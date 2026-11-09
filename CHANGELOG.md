@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.0] - 2026-11-09
+
+### Added
+
+- **PlayPixelPro fork release.** This fork packages the current Relay AI launcher, provider registry, visual UI, local gateways, Free Pool, account usage, multi-account OAuth, and supported Claude, Codex, Gemini and Antigravity integrations as version 1.0.0.
+- **Browser PKCE authentication for OpenAI/ChatGPT.** CLI and UI sign-in use the registered localhost callback flow on port 1455, with a safe fallback to port 1457 and support for `/auth/callback`.
+- **Fork-owned funding links.** GitHub Sponsors, Patreon, Ko-fi and Buy Me a Coffee now point to PlayPixelPro.
+
 ## [0.22.4] - 2026-11-08
 
 ### Added

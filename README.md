@@ -10,10 +10,10 @@
 [![npm version](https://img.shields.io/npm/v/@jacobbd/relay-ai)](https://www.npmjs.com/package/@jacobbd/relay-ai)
 [![License](https://img.shields.io/npm/l/@jacobbd/relay-ai)](LICENSE)
 
-> ☕ **If you find relay-ai useful, consider [buying me a coffee](https://buymeacoffee.com/jacobbd).**
+> ☕ **If you like this fork, consider [supporting PlayPixelPro](https://buymeacoffee.com/playpixelpro).**
 > It's free and built in my spare time — but testing every provider runs up a real AI bill. A coffee helps me cover it and keep shipping. Thank you! 🙏
 >
-> <a href="https://buymeacoffee.com/jacobbd"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="42"></a>
+> <a href="https://buymeacoffee.com/playpixelpro"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Support PlayPixelPro" height="42"></a>
 
 📺 **Watch the Demos**
 
@@ -726,9 +726,9 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) before starting. Submit one featu
 
 ## Support
 
-If relay-ai saves you time or money, you can help cover the AI bills that go into building and testing it against every provider. Any support is hugely appreciated. 🙏
+If this fork helps you, you can help cover the AI bills that go into building and testing it against every provider. Any support is hugely appreciated. 🙏
 
-<a href="https://buymeacoffee.com/jacobbd"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="42"></a>
+<a href="https://buymeacoffee.com/playpixelpro"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Support PlayPixelPro" height="42"></a>
 
 ## Disclaimer
 

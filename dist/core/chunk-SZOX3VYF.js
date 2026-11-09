@@ -472,7 +472,7 @@ import { join } from "path";
 // package.json
 var package_default = {
   name: "@jacobbd/relay-ai",
-  version: "0.22.4",
+  version: "1.0.0",
   publishConfig: {
     access: "public"
   },
@@ -8345,7 +8345,7 @@ function wrapPoolError(error) {
 }
 var sessions = new PoolSessionRoutes();
 async function memberModel(routeId, context) {
-  const { createRelayModel: createRelayModel2 } = await import("./model-YBNEL7QV.js");
+  const { createRelayModel: createRelayModel2 } = await import("./model-BLZGZZB7.js");
   return createRelayModel2(routeId, {
     sessionId: context.sessionId,
     ...context.options?.onDebug ? { onDebug: context.options.onDebug } : {},
@@ -8946,4 +8946,4 @@ export {
   loadCoreRegistry,
   listRelayModels
 };
-//# sourceMappingURL=chunk-GRNQOR4V.js.map
+//# sourceMappingURL=chunk-SZOX3VYF.js.map

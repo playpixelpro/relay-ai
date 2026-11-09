@@ -3,7 +3,7 @@ import {
   handlePoolApi,
   invalidateUiPoolMember,
   verifyUiPoolMember
-} from "./chunk-XEDEODWS.js";
+} from "./chunk-WDZN4AQM.js";
 import {
   AA_SITE_URL,
   IntelligenceError,
@@ -13,7 +13,7 @@ import {
   loadIntelligenceCache,
   refreshIntelligence,
   removeIntelligence
-} from "./chunk-3X5C7CR4.js";
+} from "./chunk-FRLUKQHQ.js";
 import {
   addProviderFromTemplate,
   buildDedupedModelRows,
@@ -46,11 +46,11 @@ import {
   subscriptionOAuthRiskLines,
   summarizeServerProviders,
   supportsClaudeTransparentMode
-} from "./chunk-4BPIVD53.js";
+} from "./chunk-APDTF4ZX.js";
 import {
   readBody,
   sendJson
-} from "./chunk-6KKYNSUA.js";
+} from "./chunk-WEQXUYIS.js";
 import {
   DEFAULT_SERVER_UI_PORT,
   checkExistingServer,
@@ -81,20 +81,20 @@ import {
   setModelMarkedFree,
   setModelsHidden,
   updateCustomEndpointProvider
-} from "./chunk-FGH2JCMR.js";
+} from "./chunk-HFT5U5KQ.js";
 import {
   poolCatalogEntry
-} from "./chunk-S3VNFDHR.js";
+} from "./chunk-S4GRILFC.js";
 import {
   clearPoolActivity,
   fetchProviderCatalog,
   providersForCodexSubagents,
   providersForTarget
-} from "./chunk-7W4UIIEX.js";
+} from "./chunk-NVK6NWDM.js";
 import {
   copilotPlanTier
-} from "./chunk-BGFI6S24.js";
-import "./chunk-XOULEZ4D.js";
+} from "./chunk-ZQ7B2MPH.js";
+import "./chunk-X7XSUEAG.js";
 import {
   validateCustomEndpointUrl
 } from "./chunk-2FGSEXYO.js";
@@ -140,7 +140,7 @@ import {
   setTrustSystemCertificates,
   supportsManualModels,
   writeSecureLogLine
-} from "./chunk-3HFK2ZBG.js";
+} from "./chunk-DZ6Q76TV.js";
 import {
   BACKENDS,
   CODEX_SUBAGENT_MODEL_CAP,
@@ -168,7 +168,7 @@ import {
   resolveProviderCredential,
   saveProviderCredential,
   supportsAdditionalOAuthAccounts
-} from "./chunk-P5D4UPBQ.js";
+} from "./chunk-IMHDWNRN.js";
 import {
   getTemplateById,
   init_provider_templates,
@@ -1193,7 +1193,7 @@ async function handleMeasureContextWindow(req, res) {
     if (!res.writableEnded) controller.abort();
   });
   try {
-    const { checkContextWindow } = await import("./test-model-ABSGDFDC.js");
+    const { checkContextWindow } = await import("./test-model-ERSZR7AO.js");
     const context = await checkContextWindow(provider.id, body.modelId, controller.signal);
     if (!res.destroyed) sendJson(res, 200, { ok: true, context });
   } catch {
@@ -1220,7 +1220,7 @@ async function handleManualModel(req, res, action) {
     return;
   }
   try {
-    const { addManualModel, removeManualModel } = await import("./manual-models-7MLHADJ2.js");
+    const { addManualModel, removeManualModel } = await import("./manual-models-KJEDIKTD.js");
     const result = action === "add" ? await addManualModel({
       providerId: providerId.trim(),
       modelId: modelId.trim(),
@@ -1551,7 +1551,7 @@ async function handleTestModel(req, res) {
   };
   res.on("close", cancel);
   try {
-    const { testModel } = await import("./test-model-ABSGDFDC.js");
+    const { testModel } = await import("./test-model-ERSZR7AO.js");
     const result = await testModel(body.providerId.trim(), body.modelId.trim(), controller.signal);
     if (!controller.signal.aborted) {
       try {
@@ -1568,7 +1568,7 @@ async function handleTestModel(req, res) {
         if (provider && cachedModel) {
           const probeAllowed = customEndpointKind(provider) || isFreeStatus(classifyFreeStatus({ model: cachedModel, providerId: provider.id, templateId: provider.templateId }));
           if (probeAllowed || providerKind(provider.id) === "ollama") {
-            const { checkContextWindow } = await import("./test-model-ABSGDFDC.js");
+            const { checkContextWindow } = await import("./test-model-ERSZR7AO.js");
             context = await checkContextWindow(provider.id, cachedModel.id, controller.signal, { lookupOnly: !probeAllowed });
           }
         }
@@ -1642,13 +1642,13 @@ async function handleIntelligenceKey(req, res) {
       sendJson(res, 400, { ok: false, error: "Paste your Artificial Analysis API key." });
       return;
     }
-    const { fetchIntelligenceScores, saveIntelligenceKey: save } = await import("./artificial-analysis-Q7EXVO6E.js");
+    const { fetchIntelligenceScores, saveIntelligenceKey: save } = await import("./artificial-analysis-OFNUQVEU.js");
     const cache = await fetchIntelligenceScores(key);
     if (!await save(key)) {
       sendJson(res, 200, { ok: false, error: "Could not store the key in the system credential store." });
       return;
     }
-    const { writeIntelligenceCache } = await import("./artificial-analysis-Q7EXVO6E.js");
+    const { writeIntelligenceCache } = await import("./artificial-analysis-OFNUQVEU.js");
     writeIntelligenceCache(cache);
     sendJson(res, 200, { ok: true, ...await intelligenceStatusBody() });
   } catch (err) {
@@ -1715,7 +1715,7 @@ async function handleEditServerUrl(req, res) {
       sendJson(res, 400, { ok: false, error: valid.error ?? "Invalid URL", hint: valid.hint });
       return;
     }
-    const { setProviderServerUrl } = await import("./crud-XXL5O2KW.js");
+    const { setProviderServerUrl } = await import("./crud-SVCXYTPI.js");
     const previous = provider.api.url ?? "";
     if (previous.replace(/\/+$/, "") === newUrl) {
       sendJson(res, 200, { ok: true, unchanged: true });
@@ -2624,4 +2624,4 @@ export {
   runUiCommand,
   stopUiServer
 };
-//# sourceMappingURL=ui-command-7IVPWJGP.js.map
+//# sourceMappingURL=ui-command-FFVBT2MV.js.map
