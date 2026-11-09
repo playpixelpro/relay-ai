@@ -8,7 +8,7 @@ import pc from 'picocolors';
 import * as p from '@clack/prompts';
 import open from 'open';
 import { deleteProviderCredential, readStoredOAuthCredential, saveProviderCredential } from '../env.js';
-import { runOpenAiDeviceCodeFlow } from '../oauth/openai.js';
+import { runOpenAiBrowserOAuthFlow } from '../oauth/openai.js';
 import {
   supportsNativeOAuth,
   supportsAdditionalOAuthAccounts,
@@ -109,13 +109,7 @@ async function runNativeDeviceCode(providerId: NativeOAuthProviderId): Promise<O
       return tokensToStoredCredential(result.tokens, undefined, result.accountId, result.providerData);
     }
 
-    const { tokens, accountId } = await runOpenAiDeviceCodeFlow(({ url, userCode }) => {
-      spinner.stop('');
-      p.log.info(`Visit: ${pc.cyan(url)}`);
-      p.log.info(`Enter code: ${pc.bold(userCode)}`);
-      openBrowser(url);
-      spinner.start('Waiting for authorization...');
-    });
+    const { tokens, accountId } = await runOpenAiBrowserOAuthFlow();
     spinner.stop(pc.green('Signed in to OpenAI ChatGPT'));
     return tokensToStoredCredential(tokens, undefined, accountId);
   } catch (err) {

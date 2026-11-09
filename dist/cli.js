@@ -71,20 +71,20 @@ import {
   supportsClaudeTransparentMode,
   upstreamModelId,
   waitForCodexAppQuit
-} from "./chunk-HIQSB6JR.js";
+} from "./chunk-HVOOSI6X.js";
 import {
   extractApiKey,
   readBody,
   sendJson,
   warnDisabledPoolMembers
-} from "./chunk-XODZLRZH.js";
+} from "./chunk-55WYFZEQ.js";
 import {
   addManualModel,
   removeManualModel
-} from "./chunk-XMBTRYTY.js";
+} from "./chunk-2RZCORTH.js";
 import {
   translateRequest
-} from "./chunk-XQDUXM6J.js";
+} from "./chunk-GSFZXZPG.js";
 import {
   TRUST_SYSTEM_CERTS_NOTICE,
   UNTRUSTED_CERTIFICATE_CODE,
@@ -108,10 +108,10 @@ import {
   toggleProviderEnabled,
   updateCustomEndpointProvider,
   zenRegistryStub
-} from "./chunk-YD4PZYLN.js";
+} from "./chunk-GJCRQMOZ.js";
 import {
   validateCustomEndpointUrl
-} from "./chunk-5HGLQHX6.js";
+} from "./chunk-2FGSEXYO.js";
 import {
   CODEX_APP_AUTO_COMPACT_RATIO,
   CODEX_APP_PROVIDER_ID,
@@ -152,7 +152,7 @@ import {
   translateResponsesRequest,
   translatedEffortClaim,
   writeResponsesErrorStream
-} from "./chunk-ZUZVJSJL.js";
+} from "./chunk-DZWBPL4X.js";
 import {
   OPENCODE_SESSION_HEADER,
   PoolHealthStore,
@@ -192,22 +192,22 @@ import {
   retryPoolFailure,
   routableModelsForTarget,
   toOAuthRegistryId
-} from "./chunk-EE53ZNAJ.js";
+} from "./chunk-UF5HSQ52.js";
 import {
   effectiveProviderBaseUrl,
   isLikelyPlaceholderKey,
   resolveProviderTemplate,
   resolveRefreshCredential,
   syntheticTemplate
-} from "./chunk-E6UL27MK.js";
+} from "./chunk-CTHLP6OC.js";
 import {
   normalizeToolSchemaForNpm
-} from "./chunk-UR4QFFSQ.js";
+} from "./chunk-CEZPXOMT.js";
 import {
   formatUpstreamError,
   formatUpstreamErrorTrace,
   upstreamHttpStatus
-} from "./chunk-IRMXZJ3D.js";
+} from "./chunk-GCAHVQ72.js";
 import {
   EFFORT_RANK,
   VERTEX_ANTHROPIC_PROVIDER_ID,
@@ -271,7 +271,7 @@ import {
   vertexAnthropicCachedModels,
   vertexModelDisplayName,
   writeSecureLogLine
-} from "./chunk-S3QYWK2P.js";
+} from "./chunk-4YNBCXOB.js";
 import {
   DEFAULT_VERTEX_MODELS,
   hasApplicationDefaultCredentials,
@@ -280,7 +280,7 @@ import {
   resetVertexModelEntries,
   resolveVertexProject,
   saveVertexModelEntries
-} from "./chunk-W32XKRNU.js";
+} from "./chunk-3YGQMZQZ.js";
 import {
   ANTIGRAVITY_BASE_URLS,
   ANTIGRAVITY_USER_AGENT,
@@ -318,7 +318,7 @@ import {
   saveToCredentialStore,
   supportsAdditionalOAuthAccounts,
   supportsNativeOAuth
-} from "./chunk-QYL2HTTP.js";
+} from "./chunk-TASA6DTW.js";
 import {
   filterTemplates,
   getTemplateById,
@@ -328,13 +328,13 @@ import {
   listSupportedTemplates,
   listVisibleOAuthTemplates,
   supportsAdditionalApiAccounts
-} from "./chunk-6DCEGHZH.js";
+} from "./chunk-JPZ3S2TA.js";
 import {
   getAppHome,
   getConfigPath,
   getLogsPath,
   getProvidersPath
-} from "./chunk-XEH2JMTL.js";
+} from "./chunk-TWCLCOFD.js";
 import "./chunk-JIDIH7DS.js";
 
 // src/cli.ts
@@ -3622,7 +3622,7 @@ async function runModelContextMenu(providerId, model) {
     if (choice === "test") {
       const spinner11 = p8.spinner();
       spinner11.start(`Testing ${current.id}...`);
-      const { testModel } = await import("./test-model-6YVKO34H.js");
+      const { testModel } = await import("./test-model-VP4EAJMT.js");
       const result = await testModel(providerId, current.id);
       spinner11.stop("");
       if (!result.ok) {
@@ -18212,11 +18212,11 @@ Options:
   --trace    Write debug logs under ~/.relay-ai/logs/`);
       return 0;
     }
-    const { runUiCommand } = await import("./ui-command-2TSGYJEQ.js");
+    const { runUiCommand } = await import("./ui-command-JRTNTKJY.js");
     return runUiCommand({ trace: parsed.trace, serverMode: parsed.uiServerMode });
   }
   if (parsed.command === "pool") {
-    const { poolHelpText, runPoolCommand } = await import("./command-WHSIVJW5.js");
+    const { poolHelpText, runPoolCommand } = await import("./command-QYNSQT7R.js");
     if (parsed.showHelp) {
       printHelp(poolHelpText);
       return 0;

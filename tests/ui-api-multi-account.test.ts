@@ -7,7 +7,6 @@ const state = vi.hoisted(() => ({
   registry: { schemaVersion: 1, providers: [] as any[] },
   save: vi.fn(),
   refresh: vi.fn(),
-  poll: vi.fn(),
 }));
 
 vi.mock('../src/provider-catalog.js', () => ({ fetchProviderCatalog: vi.fn(async () => state.catalog) }));
@@ -22,9 +21,17 @@ vi.mock('../src/registry/refresh-models.js', () => ({
   refreshAllProviderModels: vi.fn(async () => ({ refreshed: [] })),
 }));
 vi.mock('../src/oauth/openai.js', () => ({
-  requestOpenAiDeviceCode: vi.fn(async () => ({ device_auth_id: 'secret', user_code: 'OAI-1234', interval: '5' })),
-  pollOpenAiDeviceCodeToken: state.poll,
-  openAiDeviceCodeUrl: vi.fn(() => 'https://auth.openai.com/codex/device'),
+  buildOpenAiBrowserAuthUrl: vi.fn(async () => ({
+    authUrl: 'https://auth.openai.com/oauth/authorize',
+    codeVerifier: 'verifier',
+    oauthState: 'state',
+    redirectUri: 'http://127.0.0.1:1455/auth/callback',
+    callbackServer: { waitForCallback: vi.fn(async () => ({ code: 'code', state: 'state' })), close: vi.fn() },
+  })),
+  exchangeOpenAiBrowserCode: vi.fn(async () => ({
+    tokens: { access_token: 'a', refresh_token: 'r' },
+    accountId: 'ws-1',
+  })),
 }));
 
 async function call(method: string, url: string, body?: unknown) {
@@ -54,7 +61,6 @@ describe('UI: several OAuth accounts', () => {
     vi.clearAllMocks();
     state.catalog = [];
     state.registry = { schemaVersion: 1, providers: [] };
-    state.poll.mockResolvedValue({ tokens: { access_token: 'a', refresh_token: 'r' }, accountId: 'ws-1' });
     state.save.mockResolvedValue('openai-oauth-2');
     state.refresh.mockResolvedValue({ ok: true, modelCount: 1 });
   });

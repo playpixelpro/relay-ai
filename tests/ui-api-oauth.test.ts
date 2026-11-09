@@ -47,9 +47,8 @@ vi.mock('../src/oauth/xai.js', () => ({
 }));
 
 vi.mock('../src/oauth/openai.js', () => ({
-  requestOpenAiDeviceCode: vi.fn(),
-  pollOpenAiDeviceCodeToken: vi.fn(),
-  openAiDeviceCodeUrl: vi.fn(),
+  buildOpenAiBrowserAuthUrl: vi.fn(),
+  exchangeOpenAiBrowserCode: vi.fn(),
 }));
 
 vi.mock('../src/oauth/cline-pass.js', () => ({

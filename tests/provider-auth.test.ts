@@ -38,7 +38,7 @@ vi.mock('../src/oauth/cline-pass.js', () => ({
   })),
 }));
 vi.mock('../src/oauth/openai.js', () => ({
-  runOpenAiDeviceCodeFlow: vi.fn(),
+  runOpenAiBrowserOAuthFlow: vi.fn(),
 }));
 vi.mock('../src/env.js', () => ({
   saveProviderCredential: vi.fn(async () => false),
@@ -60,7 +60,6 @@ vi.mock('@clack/prompts', () => ({
 }));
 
 import { readStoredOAuthCredential, saveProviderCredential } from '../src/env.js';
-import { runOpenAiDeviceCodeFlow } from '../src/oauth/openai.js';
 import { deleteProviderCredential } from '../src/env.js';
 import { loadRegistry, saveRegistry } from '../src/registry/io.js';
 import { refreshProviderModels } from '../src/registry/refresh-models.js';
@@ -69,6 +68,7 @@ import { runOpencodeAuthBroker } from '../src/registry/auth-broker.js';
 import { runAntigravityOAuthFlow } from '../src/oauth/antigravity-oauth.js';
 import { runClaudeCodeOAuthFlow } from '../src/oauth/claude-code.js';
 import { runClinePassDeviceCodeFlow } from '../src/oauth/cline-pass.js';
+import { runOpenAiBrowserOAuthFlow } from '../src/oauth/openai.js';
 import * as prompts from '@clack/prompts';
 
 describe('authenticateProvider', () => {
@@ -229,8 +229,8 @@ describe('authenticateProvider: several accounts of one provider', () => {
     vi.mocked(deleteProviderCredential).mockClear();
     vi.mocked(saveRegistry).mockClear();
     vi.mocked(refreshProviderModels).mockReset();
+    vi.mocked(runOpenAiBrowserOAuthFlow).mockReset().mockResolvedValue(openAiLogin('personal@example.com') as any);
     vi.mocked(readStoredOAuthCredential).mockReset().mockImplementation(async (authRef: string) => stored.get(authRef) as any);
-    vi.mocked(runOpenAiDeviceCodeFlow).mockReset().mockResolvedValue(openAiLogin('personal@example.com') as any);
   });
 
   const withRegistry = (...providers: Array<ReturnType<typeof chatgpt>>) =>
@@ -321,7 +321,7 @@ describe('authenticateProvider: several accounts of one provider', () => {
   it('rejects an unknown account id', async () => {
     withRegistry(chatgpt('openai-oauth'));
     await expect(authenticateProvider('openai-oauth-7')).rejects.toThrow(/not found/i);
-    expect(runOpenAiDeviceCodeFlow).not.toHaveBeenCalled();
+    expect(runOpenAiBrowserOAuthFlow).not.toHaveBeenCalled();
   });
 
   const browserEntry = (id: string, templateId: string, name: string, authRef = `keyring:oauth:provider:${id}`) => ({

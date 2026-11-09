@@ -25,14 +25,14 @@ const SUCCESS_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Au
 <p style="color:#666">You can close this tab and return to the terminal.</p>
 </div></body></html>`;
 
-export function startCallbackServer(): Promise<CallbackServer> {
+export function startCallbackServer(preferredPort?: number): Promise<CallbackServer> {
   return new Promise((resolve, reject) => {
     let codeResolve: ((p: CallbackParams) => void) | undefined;
     let codeReject: ((e: Error) => void) | undefined;
 
     const server = http.createServer((req, res) => {
       const u = new URL(req.url ?? '/', 'http://localhost');
-      if (u.pathname !== '/callback' && u.pathname !== '/oauth/callback') {
+      if (u.pathname !== '/callback' && u.pathname !== '/oauth/callback' && u.pathname !== '/auth/callback') {
         res.writeHead(404); res.end(); return;
       }
       const code = u.searchParams.get('code') ?? '';
@@ -43,7 +43,15 @@ export function startCallbackServer(): Promise<CallbackServer> {
       codeResolve?.({ code, state, error: error || undefined });
     });
 
-    server.listen(0, '127.0.0.1', () => {
+    const listen = (port: number, allowFallback: boolean): void => {
+      server.once('error', (error: NodeJS.ErrnoException) => {
+        if (allowFallback && error.code === 'EADDRINUSE') {
+          listen(1457, false);
+        } else {
+          reject(error);
+        }
+      });
+      server.listen(port, '127.0.0.1', () => {
       const addr = server.address() as { port: number };
       const port = addr.port;
       resolve({
@@ -61,8 +69,10 @@ export function startCallbackServer(): Promise<CallbackServer> {
         },
         close() { server.close(); codeReject?.(new Error('Server closed')); },
       });
-    });
+      });
+    };
 
-    server.on('error', reject);
+    // OpenAI's registered loopback redirects use ports 1455 and 1457.
+    listen(preferredPort ?? 0, preferredPort !== undefined);
   });
 }

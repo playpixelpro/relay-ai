@@ -1748,14 +1748,17 @@ function pollOAuthSession({ sessionId, signInButton, refreshButton, feedback, on
 // server by itself; Claude Code shows a code on Anthropic's page that the user pastes into the box
 // (`codeSessionId` is set for that case).
 function showBrowserSignInPrompt(feedback, authUrl, codeSessionId = null) {
+  const isOpenAi = authUrl.includes('auth.openai.com');
   const note = document.createElement('div');
   note.textContent = codeSessionId
     ? 'Open the sign-in page, sign in with the account you want, then copy the code Anthropic shows and paste it below.'
-    : 'Open the Google sign-in page, finish signing in there, and this page updates by itself.';
+    : isOpenAi
+      ? 'Open the ChatGPT sign-in page and finish signing in there. This page updates automatically.'
+      : 'Open the Google sign-in page, finish signing in there, and this page updates by itself.';
   const openButton = document.createElement('button');
   openButton.type = 'button';
   openButton.className = 'btn btn-primary';
-  openButton.textContent = codeSessionId ? 'Open Claude sign-in' : 'Open Google sign-in';
+  openButton.textContent = codeSessionId ? 'Open Claude sign-in' : isOpenAi ? 'Open ChatGPT sign-in' : 'Open Google sign-in';
   openButton.style.marginTop = '8px';
   openButton.addEventListener('click', () => {
     window.open(authUrl, '_blank', 'noopener,noreferrer');
@@ -1893,14 +1896,16 @@ function buildOAuthTemplateBodyContent(template) {
   note.className = 'oauth-device-note';
   note.textContent = template.subscriptionRisk
     ? 'Sign in with your subscription account — no API key required. This uses a paid subscription outside its official app, which may put that account at risk. You will be asked to confirm before sign-in starts.'
-    : 'Sign in with a one-time device code — no API key required.';
+    : template.id === 'openai-oauth'
+      ? 'Sign in directly in your browser with your ChatGPT subscription — no code to copy.'
+      : 'Sign in with a one-time device code — no API key required.';
 
   const actionRow = document.createElement('div');
   actionRow.className = 'key-row';
 
   const signInBtn = document.createElement('button');
   signInBtn.className = 'btn btn-primary';
-  signInBtn.textContent = 'Get sign-in code';
+  signInBtn.textContent = template.id === 'openai-oauth' ? 'Sign in with ChatGPT' : 'Get sign-in code';
 
   const feedback = document.createElement('div');
   feedback.className = 'key-feedback';

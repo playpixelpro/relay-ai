@@ -54,7 +54,8 @@ import { guessModelKindFromName, MODEL_KINDS, nameKindOutranksChatTest, type Mod
 import type { RegistryProvider } from '../registry/types.js';
 import { modelsDevModelKind } from '../registry/models-dev.js';
 import { requestXaiDeviceCode, pollXaiDeviceCodeToken } from '../oauth/xai.js';
-import { requestOpenAiDeviceCode, pollOpenAiDeviceCodeToken, openAiDeviceCodeUrl } from '../oauth/openai.js';
+import { buildOpenAiBrowserAuthUrl, exchangeOpenAiBrowserCode } from '../oauth/openai.js';
+import type { CallbackServer } from '../oauth/callback-server.js';
 import { requestGithubDeviceCode, pollGithubDeviceCodeToken } from '../oauth/github.js';
 import { requestClinePassDeviceCode, pollClinePassDeviceCode } from '../oauth/cline-pass.js';
 import {
@@ -110,6 +111,7 @@ interface OAuthSession {
   redirectUri?: string;
   codeResolver?: (code: string) => void;
   errorRejecter?: (err: string) => void;
+  callbackServer?: CallbackServer;
 }
 
 const oauthSessions = new Map<string, OAuthSession>();
@@ -1402,21 +1404,35 @@ async function handleOAuthStart(
       return;
     }
 
-    // openai-oauth
-    const device = await requestOpenAiDeviceCode();
-    const url = openAiDeviceCodeUrl();
-    const session: OAuthSession = { status: 'pending', url, userCode: device.user_code, providerId };
+    // OpenAI ChatGPT: direct browser authorization with a localhost PKCE callback.
+    const auth = await buildOpenAiBrowserAuthUrl();
+    const session: OAuthSession = {
+      status: 'pending',
+      url: auth.authUrl,
+      providerId,
+      codeVerifier: auth.codeVerifier,
+      oauthState: auth.oauthState,
+      redirectUri: auth.redirectUri,
+      callbackServer: auth.callbackServer,
+    };
     oauthSessions.set(sessionId, session);
 
-    pollOpenAiDeviceCodeToken(device).then(async ({ tokens, accountId }) => {
+    auth.callbackServer.waitForCallback().then(async callback => {
+      if (callback.error) throw new Error(`OpenAI authorization failed: ${callback.error}`);
+      if (!callback.state || callback.state !== auth.oauthState) throw new Error('OpenAI returned an unexpected OAuth state');
+      if (!callback.code) throw new Error('OpenAI did not return an authorization code');
+      return exchangeOpenAiBrowserCode(callback.code, auth.codeVerifier, auth.redirectUri);
+    }).then(async ({ tokens, accountId }) => {
       const savedId = await saveNativeOAuthCredential(providerId, tokens, accountId, undefined, { addAccount });
       await refreshOAuthProviderModels(typeof savedId === 'string' ? savedId : providerId);
+      auth.callbackServer.close();
       oauthSessions.set(sessionId, { ...session, status: 'done' });
     }).catch(err => {
+      auth.callbackServer.close();
       oauthSessions.set(sessionId, { ...session, status: 'error', error: err instanceof Error ? err.message : String(err) });
     });
 
-    sendJson(res, 200, { sessionId, url, userCode: device.user_code });
+    sendJson(res, 200, { sessionId, authUrl: auth.authUrl, pkce: true });
   } catch (err) {
     sendJson(res, 500, { error: String(err) });
   }

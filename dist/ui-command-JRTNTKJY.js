@@ -1,0 +1,2533 @@
+#!/usr/bin/env node
+import {
+  handlePoolApi,
+  invalidateUiPoolMember,
+  verifyUiPoolMember
+} from "./chunk-7HZ7T4UP.js";
+import {
+  addProviderFromTemplate,
+  buildDedupedModelRows,
+  checkForUpdates,
+  claudeCodeProviderData,
+  createGatewayModelCatalog,
+  favoriteProviderDisplayName,
+  filterServerModelsByFavorites,
+  filterServerModelsByFreeStatus,
+  filterServerModelsByProviders,
+  findBinaryOnPath,
+  findClaudeApp,
+  findCodexApp,
+  formatGatewayUrls,
+  gatewayProviderLabel,
+  hostFromHeader,
+  loadServerModels,
+  normalizeFavoriteModels,
+  openAiIdCollisions,
+  providerOptionsFromCatalog,
+  readOAuthAccountLabel,
+  resolveAdvertiseAddresses,
+  resolveAdvertiseGatewayPort,
+  resolveServerUpstreamApiKey,
+  saveNativeOAuthCredential,
+  startServer,
+  subscriptionOAuthRiskLines,
+  summarizeServerProviders,
+  supportsClaudeTransparentMode
+} from "./chunk-HVOOSI6X.js";
+import {
+  readBody,
+  sendJson
+} from "./chunk-55WYFZEQ.js";
+import "./chunk-GSFZXZPG.js";
+import {
+  TRUST_SYSTEM_CERTS_NOTICE,
+  addCustomEndpointProvider,
+  applySystemCaTrust,
+  customEndpointKind,
+  ensureOpencodeCloudProviders,
+  isSystemCaActive,
+  isSystemCaSupported,
+  recordModelTestResult,
+  refreshAllProviderModels,
+  refreshProviderModels,
+  removeProviderFromRegistry,
+  renameProvider,
+  revertSystemCaTrust,
+  setContextWindowOverride,
+  setModelHidden,
+  setModelKindOverride,
+  setModelMarkedFree,
+  setModelsHidden,
+  updateCustomEndpointProvider
+} from "./chunk-GJCRQMOZ.js";
+import {
+  validateCustomEndpointUrl
+} from "./chunk-2FGSEXYO.js";
+import {
+  poolCatalogEntry
+} from "./chunk-DZWBPL4X.js";
+import {
+  fetchProviderCatalog,
+  providersForCodexSubagents,
+  providersForTarget
+} from "./chunk-UF5HSQ52.js";
+import {
+  copilotPlanTier
+} from "./chunk-CTHLP6OC.js";
+import "./chunk-CEZPXOMT.js";
+import "./chunk-GCAHVQ72.js";
+import {
+  MODEL_KINDS,
+  classifyFreeStatus,
+  freeStatusLabel,
+  getAgentProviderModels,
+  getAppPathOverride,
+  getEnvServerPassword,
+  getProviderModels,
+  getSavedServerPassword,
+  getServerDebugLogPath,
+  getServerExposedProviders,
+  getServerFavoritesOnly,
+  getServerFreeModelsOnly,
+  getServerListenMode,
+  getServerMaskGatewayIds,
+  getTrustSystemCertificates,
+  getUiDebugLogPath,
+  guessModelKindFromName,
+  isFreeStatus,
+  loadPreferences,
+  loadRegistry,
+  localTimestamp,
+  makeTraceLogger,
+  modelsDevModelKind,
+  nameKindOutranksChatTest,
+  parseFreePool,
+  recordLaunchFolder,
+  resolveServerAutostart,
+  savePreferences,
+  setAppPathOverride,
+  setSavedServerPassword,
+  setServerAutostart,
+  setServerExposedProviders,
+  setServerFavoritesOnly,
+  setServerFreeModelsOnly,
+  setServerListenMode,
+  setServerMaskGatewayIds,
+  setTrustSystemCertificates,
+  supportsManualModels,
+  writeSecureLogLine
+} from "./chunk-4YNBCXOB.js";
+import "./chunk-3YGQMZQZ.js";
+import {
+  AA_SITE_URL,
+  IntelligenceError,
+  buildIntelligenceLookup,
+  hasIntelligenceKey,
+  isIntelligenceStale,
+  loadIntelligenceCache,
+  refreshIntelligence,
+  removeIntelligence
+} from "./chunk-CNJ3FPFP.js";
+import {
+  BACKENDS,
+  CODEX_SUBAGENT_MODEL_CAP,
+  MAX_MODEL_CATALOG,
+  VERSION,
+  buildAntigravityAuthUrl,
+  buildClaudeCodeAuthUrl,
+  buildOpenAiBrowserAuthUrl,
+  completeAntigravityExchange,
+  completeClaudeCodeExchange,
+  describeOAuthAccount,
+  exchangeOpenAiBrowserCode,
+  formatOAuthAccount,
+  guiCallbackRedirectUri,
+  isProviderKind,
+  pollClinePassDeviceCode,
+  pollGithubDeviceCodeToken,
+  pollXaiDeviceCodeToken,
+  preferredRelayCredentialAuthRef,
+  providerKind,
+  readStoredProviderCredential,
+  requestClinePassDeviceCode,
+  requestGithubDeviceCode,
+  requestXaiDeviceCode,
+  resolveProviderCredential,
+  saveProviderCredential,
+  supportsAdditionalOAuthAccounts
+} from "./chunk-TASA6DTW.js";
+import {
+  getTemplateById,
+  init_provider_templates,
+  listAccountTemplates,
+  listAddableTemplates,
+  listVisibleOAuthTemplates,
+  provider_templates_exports,
+  supportsAdditionalApiAccounts
+} from "./chunk-JPZ3S2TA.js";
+import {
+  getAppHome
+} from "./chunk-TWCLCOFD.js";
+import {
+  __toCommonJS
+} from "./chunk-JIDIH7DS.js";
+
+// src/ui-command.ts
+import { createServer } from "http";
+import { readFileSync, readdirSync, writeFileSync as writeFileSync2, unlinkSync, existsSync as existsSync3, mkdirSync } from "fs";
+import { join as join2 } from "path";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
+import pc from "picocolors";
+import * as p from "@clack/prompts";
+
+// src/native-launcher.ts
+import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "fs";
+import { homedir } from "os";
+import { tmpdir } from "os";
+import { join } from "path";
+var isWindows = process.platform === "win32";
+var isMac = process.platform === "darwin";
+var SUPPORTED_APPS = [
+  { id: "claude", name: "Claude Code CLI", type: "cli", detectId: "claude", relayCommand: "claude" },
+  { id: "codex", name: "Codex CLI", type: "cli", detectId: "codex", relayCommand: "codex" },
+  { id: "gemini", name: "Gemini CLI", type: "cli", detectId: "gemini", relayCommand: "gemini" },
+  { id: "agy", name: "Antigravity CLI", type: "cli", detectId: "agy", relayCommand: "agy" },
+  {
+    id: "antigravity",
+    name: "Antigravity (App)",
+    type: "app",
+    detectId: "antigravity",
+    relayCommand: "antigravity"
+  },
+  {
+    id: "antigravity-ide",
+    name: "Antigravity IDE (App)",
+    type: "app",
+    detectId: "antigravity-ide",
+    relayCommand: "antigravity-ide"
+  },
+  {
+    id: "claude-app",
+    name: "Claude Code Desktop",
+    type: "app",
+    detectId: "claude-app",
+    relayCommand: "claude-app"
+  },
+  {
+    id: "codex-app",
+    name: "ChatGPT Desktop (Codex)",
+    type: "app",
+    detectId: "codex-app",
+    relayCommand: "codex-app"
+  }
+];
+function fallbackPathsForApp(id, platform = process.platform) {
+  const windows = platform === "win32";
+  const mac = platform === "darwin";
+  const appData = process.env["APPDATA"] ?? homedir();
+  const localAppData = process.env["LOCALAPPDATA"] ?? join(homedir(), "AppData", "Local");
+  switch (id) {
+    case "claude":
+      return windows ? [
+        join(appData, "npm", "claude.cmd"),
+        join(appData, "npm", "claude")
+      ] : [
+        join(homedir(), ".local", "bin", "claude"),
+        join(homedir(), ".npm", "bin", "claude"),
+        "/usr/local/bin/claude",
+        "/opt/homebrew/bin/claude"
+      ];
+    case "codex":
+      return windows ? [
+        join(appData, "npm", "codex.cmd"),
+        join(appData, "npm", "codex")
+      ] : [
+        join(homedir(), ".local", "bin", "codex"),
+        join(homedir(), ".npm", "bin", "codex"),
+        "/usr/local/bin/codex",
+        "/opt/homebrew/bin/codex"
+      ];
+    case "gemini":
+      return windows ? [
+        join(appData, "npm", "gemini.cmd"),
+        join(appData, "npm", "gemini")
+      ] : [
+        join(homedir(), ".local", "bin", "gemini"),
+        join(homedir(), ".npm", "bin", "gemini"),
+        "/usr/local/bin/gemini",
+        "/opt/homebrew/bin/gemini"
+      ];
+    case "agy":
+      return windows ? [
+        join(appData, "npm", "agy.cmd"),
+        join(appData, "npm", "agy"),
+        join(localAppData, "Antigravity", "agy.exe")
+      ] : [
+        join(homedir(), ".local", "bin", "agy"),
+        join(homedir(), ".npm", "bin", "agy"),
+        "/usr/local/bin/agy",
+        "/opt/homebrew/bin/agy"
+      ];
+    case "antigravity-ide":
+      if (mac) {
+        return [
+          "/Applications/Antigravity IDE.app/Contents/Resources/app/bin/antigravity-ide",
+          join(homedir(), "Applications", "Antigravity IDE.app", "Contents", "Resources", "app", "bin", "antigravity-ide")
+        ];
+      }
+      if (windows) {
+        return [
+          join(localAppData, "Programs", "Antigravity IDE", "Antigravity IDE.exe"),
+          join(localAppData, "Programs", "antigravity-ide", "Antigravity IDE.exe"),
+          join(localAppData, "Programs", "Antigravity", "Antigravity IDE.exe")
+        ];
+      }
+      return ["/opt/antigravity-ide/Antigravity-IDE"];
+    case "antigravity":
+      if (mac) {
+        return [
+          "/Applications/Antigravity.app/Contents/MacOS/Antigravity",
+          join(homedir(), "Applications", "Antigravity.app", "Contents", "MacOS", "Antigravity")
+        ];
+      }
+      if (windows) {
+        return [
+          join(localAppData, "Programs", "Antigravity", "Antigravity.exe")
+        ];
+      }
+      return [
+        "/opt/antigravity/antigravity",
+        "/usr/local/bin/antigravity",
+        "/usr/bin/antigravity"
+      ];
+    case "claude-app":
+      if (mac) {
+        return [
+          "/Applications/Claude.app/Contents/MacOS/Claude",
+          join(homedir(), "Applications", "Claude.app", "Contents", "MacOS", "Claude")
+        ];
+      }
+      return windows ? [join(localAppData, "Programs", "claude", "Claude.exe")] : [];
+    case "codex-app":
+      if (mac) {
+        return [
+          "/Applications/ChatGPT.app",
+          join(homedir(), "Applications", "ChatGPT.app"),
+          "/Applications/Codex.app",
+          join(homedir(), "Applications", "Codex.app")
+        ];
+      }
+      return windows ? [
+        join(localAppData, "Programs", "ChatGPT", "ChatGPT.exe"),
+        join(localAppData, "Programs", "OpenAI ChatGPT", "ChatGPT.exe"),
+        join(localAppData, "openai-chatgpt-electron", "ChatGPT.exe"),
+        join(localAppData, "Programs", "Codex", "Codex.exe"),
+        join(localAppData, "Programs", "OpenAI Codex", "Codex.exe"),
+        join(localAppData, "openai-codex-electron", "Codex.exe")
+      ] : [
+        "/usr/bin/chatgpt",
+        "/usr/lib/chatgpt/ChatGPT",
+        "/opt/chatgpt/ChatGPT",
+        "/usr/local/lib/chatgpt/ChatGPT",
+        join(homedir(), ".local", "bin", "chatgpt"),
+        join(homedir(), ".local", "share", "chatgpt", "ChatGPT")
+      ];
+    default:
+      return [];
+  }
+}
+var FALLBACKS = Object.fromEntries(
+  SUPPORTED_APPS.map((app) => [app.detectId, fallbackPathsForApp(app.detectId)])
+);
+function getSupportedApp(id) {
+  return SUPPORTED_APPS.find((app) => app.id === id);
+}
+function detectApp(id) {
+  const override = getAppPathOverride(id);
+  if (override) {
+    return existsSync(override) ? { installed: true, path: override, pathSource: "override" } : { installed: false, path: override, pathSource: "override" };
+  }
+  const resolvedPath = findBinaryOnPath(id, FALLBACKS[id] ?? [], { verifyWhichResult: true });
+  if (resolvedPath) {
+    return { installed: true, path: resolvedPath, pathSource: "auto" };
+  }
+  const appFinder = id === "claude-app" ? findClaudeApp : id === "codex-app" ? findCodexApp : null;
+  if (appFinder) {
+    const appPath = appFinder();
+    if (appPath) return { installed: true, path: appPath, pathSource: "auto" };
+  }
+  return { installed: false, path: null, pathSource: null };
+}
+function getTerminalLaunchCommand(binPath, args, opts = {}) {
+  const fullCmd = [binPath, ...args].map((arg) => {
+    if (!/^[a-zA-Z0-9\-_./:@]+$/.test(arg)) {
+      throw new Error(`Unsafe launch argument: ${JSON.stringify(arg)}`);
+    }
+    return arg;
+  }).join(" ");
+  const cwdPrefix = opts.cwd ? `cd ${quoteShellArg(opts.cwd)} && ` : "";
+  const runCmd = `${cwdPrefix}${fullCmd}`;
+  if (isMac) {
+    const dir2 = mkdtempSync(join(tmpdir(), "relay-ai-launch-"));
+    const scriptPath2 = join(dir2, "launch.command");
+    const displayCommand = opts.displayCommand ?? [binPath, ...args].join(" ");
+    writeFileSync(scriptPath2, [
+      "#!/bin/sh",
+      `trap 'rm -f "$0"; rmdir "$(dirname "$0")" 2>/dev/null' EXIT`,
+      "clear",
+      opts.cwd ? `cd ${quoteShellArg(opts.cwd)} || exit 1` : "",
+      `printf '%s\\n\\n' ${quoteShellArg(`$ ${displayCommand}`)}`,
+      fullCmd,
+      "status=$?",
+      'printf "\\nRelay AI session exited with code %s. Press Return to close this window. " "$status"',
+      "read _",
+      'exit "$status"',
+      ""
+    ].join("\n"), { encoding: "utf8", mode: 448 });
+    chmodSync(scriptPath2, 448);
+    return `open -a Terminal ${quoteShellArg(scriptPath2)}`;
+  }
+  if (isWindows) {
+    const dirFlag = opts.cwd ? `/d "${opts.cwd}" ` : "";
+    return `start "Relay AI Terminal" ${dirFlag}cmd.exe /k "${fullCmd}"`;
+  }
+  const dir = mkdtempSync(join(tmpdir(), "relay-ai-launch-"));
+  const scriptPath = join(dir, "launch.sh");
+  writeFileSync(scriptPath, [
+    "#!/bin/sh",
+    runCmd,
+    "exec sh",
+    ""
+  ].join("\n"), { encoding: "utf8", mode: 448 });
+  chmodSync(scriptPath, 448);
+  const scriptArg = quoteShellArg(scriptPath);
+  return `x-terminal-emulator -e sh ${scriptArg} || gnome-terminal -- sh ${scriptArg} || xterm -e sh ${scriptArg}`;
+}
+function quoteShellArg(value) {
+  if (/^[a-zA-Z0-9\-_./]+$/.test(value)) return value;
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+function relayCliPath() {
+  return "relay-ai";
+}
+function getRelayLaunchCommand(appId, options = {}) {
+  const app = getSupportedApp(appId);
+  if (!app) throw new Error(`Unsupported app: ${appId}`);
+  if (options.providerId === "relay-free-pool" && options.modelId === "relay-free-pool") {
+    options = { ...options, pool: true, providerId: void 0, modelId: void 0 };
+  }
+  const args = [app.relayCommand];
+  if (options.pool) {
+    if (!["claude", "codex"].includes(app.id) || options.httpProxy || options.withNative || options.providerId || options.modelId) throw new Error("Free pool launches require Claude Code CLI or Codex CLI without another model selection.");
+    args.push("--pool");
+  }
+  if (options.trace) {
+    args.push("--trace");
+  }
+  if (options.httpProxy) {
+    if (app.id !== "claude") {
+      throw new Error("Transparent proxy mode is available only for Claude Code CLI.");
+    }
+    args.push("--http-proxy");
+  }
+  if (options.withNative) {
+    if (app.id !== "codex" && app.id !== "codex-app") {
+      throw new Error("Native Codex mixed mode is available only for Codex CLI and ChatGPT Desktop.");
+    }
+    args.push("--with-native");
+  }
+  if (options.providerId && options.modelId) {
+    args.push("--provider", options.providerId, "--model", options.modelId);
+  } else if (options.providerId || options.modelId) {
+    throw new Error("Both providerId and modelId are required for an explicit Relay launch.");
+  }
+  return getTerminalLaunchCommand(relayCliPath(), args, {
+    cwd: options.cwd,
+    displayCommand: ["relay-ai", ...args].join(" ")
+  });
+}
+function getSupportedApps() {
+  return SUPPORTED_APPS.map((app) => {
+    const { installed, path, pathSource } = detectApp(app.detectId);
+    return {
+      id: app.id,
+      name: app.name,
+      type: app.type,
+      installed,
+      path,
+      pathSource,
+      relayCommand: app.relayCommand,
+      launchCommand: installed ? getRelayLaunchCommand(app.id) : null
+    };
+  });
+}
+
+// src/ui/api.ts
+import { exec } from "child_process";
+import { promisify } from "util";
+import { existsSync as existsSync2, statSync } from "fs";
+import { randomUUID } from "crypto";
+init_provider_templates();
+
+// src/ui/server-control.ts
+var running = null;
+var startInFlight = null;
+var SAVED_PASSWORD_CACHE_TTL_MS = 3e4;
+var hasSavedPasswordCache = null;
+async function hasSavedPasswordCached() {
+  const now = Date.now();
+  if (hasSavedPasswordCache && hasSavedPasswordCache.expiresAt > now) return hasSavedPasswordCache.value;
+  const value = Boolean(await getSavedServerPassword());
+  hasSavedPasswordCache = { value, expiresAt: now + SAVED_PASSWORD_CACHE_TTL_MS };
+  return value;
+}
+function buildModelRows(models, gateway) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const model of models) {
+    const label = gatewayProviderLabel(model);
+    const list = groups.get(label);
+    if (list) list.push(model);
+    else groups.set(label, [model]);
+  }
+  const collisions = openAiIdCollisions(models);
+  const rows = [];
+  for (const [providerLabel, groupModels] of groups) {
+    for (const row of buildDedupedModelRows(groupModels, gateway, collisions)) rows.push({ providerLabel, ...row });
+  }
+  return rows.sort((a, b) => a.providerLabel.localeCompare(b.providerLabel) || a.name.localeCompare(b.name));
+}
+async function buildSavedConfig() {
+  const envPassword = getEnvServerPassword();
+  return {
+    favoritesOnly: getServerFavoritesOnly(),
+    freeModelsOnly: getServerFreeModelsOnly(),
+    exposedProviders: getServerExposedProviders(),
+    maskGatewayIds: getServerMaskGatewayIds(),
+    listenMode: getServerListenMode(),
+    autostart: resolveServerAutostart(),
+    hasSavedPassword: await hasSavedPasswordCached(),
+    hasEnvPassword: Boolean(envPassword),
+    ...envPassword ? { prefillPassword: envPassword } : {}
+  };
+}
+async function getServerStatus(opts) {
+  const saved = await buildSavedConfig();
+  if (!running) return { running: false, saved };
+  const { handle, config, serverPassword, providerSummary, modelRows } = running;
+  const publicPort = resolveAdvertiseGatewayPort(handle.port);
+  const loopback = formatGatewayUrls("127.0.0.1", publicPort);
+  const payload = {
+    running: true,
+    saved,
+    listenMode: config.listenMode,
+    anthropicUrl: loopback.anthropicUrl,
+    openaiUrl: loopback.openaiUrl,
+    exposedProviders: config.exposedProviders,
+    favoritesOnly: config.favoritesOnly,
+    freeModelsOnly: config.freeModelsOnly,
+    maskGatewayIds: config.maskGatewayIds,
+    providerSummary,
+    models: modelRows
+  };
+  if (config.listenMode === "network") {
+    payload.networkUrls = resolveAdvertiseAddresses({ requestHost: opts?.requestHost }).map(
+      ({ name, address }) => {
+        const urls = formatGatewayUrls(address, publicPort);
+        return { name, anthropicUrl: urls.anthropicUrl, openaiUrl: urls.openaiUrl };
+      }
+    );
+    payload.apiKey = serverPassword ?? void 0;
+  } else {
+    payload.apiKey = "any non-empty value";
+  }
+  return payload;
+}
+function startGatewayServer(req, opts) {
+  if (running) return Promise.resolve({ ok: false, error: "Server is already running. Stop it first." });
+  if (startInFlight) return startInFlight;
+  startInFlight = doStartGatewayServer(req, opts).finally(() => {
+    startInFlight = null;
+  });
+  return startInFlight;
+}
+async function doStartGatewayServer(req, opts) {
+  if (req.listenMode !== "local" && req.listenMode !== "network") {
+    return { ok: false, error: "Invalid listen mode." };
+  }
+  const apiKey = await resolveServerUpstreamApiKey();
+  if (!apiKey) {
+    return { ok: false, error: "No providers configured. Add a provider in Providers & Keys first." };
+  }
+  let serverPassword = null;
+  if (req.listenMode === "network") {
+    if (req.passwordMode === "saved") {
+      const configured = await getSavedServerPassword() ?? getEnvServerPassword();
+      if (!configured) {
+        return {
+          ok: false,
+          error: "No configured password found \u2014 set RELAY_AI_SERVER_PASSWORD, or enter a new password."
+        };
+      }
+      serverPassword = configured;
+    } else {
+      const trimmed = (req.password ?? "").trim();
+      if (!trimmed) {
+        const configured = getEnvServerPassword() ?? await getSavedServerPassword();
+        if (!configured) return { ok: false, error: "A server password is required for network mode." };
+        serverPassword = configured;
+      } else {
+        serverPassword = trimmed;
+        if (req.savePassword) {
+          await setSavedServerPassword(trimmed);
+          hasSavedPasswordCache = { value: true, expiresAt: Date.now() + SAVED_PASSWORD_CACHE_TTL_MS };
+        }
+      }
+    }
+  }
+  let models;
+  try {
+    models = await loadServerModels();
+  } catch (err) {
+    return { ok: false, error: `Failed to load models: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  if (req.exposedProviders) models = filterServerModelsByProviders(models, req.exposedProviders);
+  if (req.favoritesOnly) {
+    const favorites = loadPreferences().favoriteModels ?? [];
+    if (favorites.length === 0) {
+      return { ok: false, error: "No favorite models configured. Add favorites in the Favorites tab first." };
+    }
+    models = filterServerModelsByFavorites(models, favorites).slice(0, MAX_MODEL_CATALOG);
+    if (models.length === 0) {
+      return { ok: false, error: "No favorite models matched the current provider filter." };
+    }
+  }
+  if (req.freeModelsOnly) {
+    models = filterServerModelsByFreeStatus(models);
+    if (models.length === 0) {
+      return { ok: false, error: "No free models matched the current server filters." };
+    }
+  }
+  if (models.length === 0) {
+    return { ok: false, error: "No models to expose. Add providers or adjust the exposed-provider filter." };
+  }
+  setServerFavoritesOnly(req.favoritesOnly);
+  setServerFreeModelsOnly(req.freeModelsOnly);
+  if (!req.favoritesOnly) {
+    setServerExposedProviders(req.exposedProviders ?? []);
+  }
+  setServerMaskGatewayIds(req.maskGatewayIds);
+  setServerListenMode(req.listenMode);
+  if (req.autostart !== void 0) {
+    setServerAutostart(req.autostart);
+  }
+  const host = req.listenMode === "network" ? "0.0.0.0" : "127.0.0.1";
+  const gateway = req.maskGatewayIds ? { maskGatewayIds: true } : void 0;
+  let handle;
+  try {
+    handle = await startServer({
+      host,
+      port: 17645,
+      apiKey,
+      serverPassword,
+      catalog: createGatewayModelCatalog(models, gateway),
+      backends: BACKENDS,
+      gateway,
+      debugLogPath: getServerDebugLogPath()
+    });
+  } catch (err) {
+    const code = err?.code;
+    const message = code === "EADDRINUSE" ? "Port 17645 is already in use \u2014 stop the other relay-ai server instance first." : `Failed to start server: ${err instanceof Error ? err.message : String(err)}`;
+    return { ok: false, error: message };
+  }
+  running = {
+    handle,
+    serverPassword,
+    config: {
+      favoritesOnly: req.favoritesOnly,
+      freeModelsOnly: req.freeModelsOnly,
+      exposedProviders: req.exposedProviders,
+      maskGatewayIds: req.maskGatewayIds,
+      listenMode: req.listenMode,
+      autostart: req.autostart ?? resolveServerAutostart()
+    },
+    providerSummary: summarizeServerProviders(models),
+    modelRows: buildModelRows(models, gateway)
+  };
+  return { ok: true, status: await getServerStatus({ requestHost: opts?.requestHost }) };
+}
+async function stopGatewayServer() {
+  if (running) {
+    await running.handle.close();
+    running = null;
+    return { ok: true, stopped: true };
+  }
+  return { ok: true, stopped: false };
+}
+async function startGatewayServerFromSavedConfig(opts) {
+  const req = {
+    favoritesOnly: getServerFavoritesOnly(),
+    freeModelsOnly: getServerFreeModelsOnly(),
+    exposedProviders: getServerExposedProviders(),
+    maskGatewayIds: getServerMaskGatewayIds(),
+    listenMode: getServerListenMode(),
+    autostart: resolveServerAutostart(),
+    passwordMode: "saved"
+  };
+  const res = await startGatewayServer(req, opts);
+  if (res.ok) {
+    return res.status;
+  }
+  console.warn(`[server-autostart] Warning: ${res.error}`);
+  return null;
+}
+
+// src/ui/api.ts
+var execAsync = promisify(exec);
+var MODELS_TIMEOUT_MS = 3e4;
+var oauthSessions = /* @__PURE__ */ new Map();
+async function fetchModelsWithTimeout(opts) {
+  const timeout = new Promise(
+    (_, reject) => setTimeout(() => reject(new Error("timeout")), MODELS_TIMEOUT_MS)
+  );
+  return Promise.race([fetchProviderCatalog(opts), timeout]);
+}
+function sendCatalogFetchError(res, err, label) {
+  const isTimeout = String(err).includes("timeout");
+  sendJson(res, isTimeout ? 504 : 500, { error: isTimeout ? `${label} timed out` : String(err) });
+}
+function isLoopbackOrigin(origin) {
+  if (!origin) return false;
+  try {
+    const hostname = new URL(origin).hostname;
+    return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+function sendCors(req, res) {
+  const origin = req.headers.origin;
+  const originValue = Array.isArray(origin) ? origin[0] : origin;
+  if (isLoopbackOrigin(originValue)) {
+    res.setHeader("Access-Control-Allow-Origin", originValue);
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+function traceUi(opts, message) {
+  if (!opts?.trace || !opts.traceLogPath) return;
+  writeSecureLogLine(opts.traceLogPath, `${localTimestamp()} ${message}`);
+}
+function notifyServerLifecycle(opts, event) {
+  try {
+    opts.onServerLifecycle?.(event);
+  } catch {
+  }
+}
+function handleUiApiRequest(req, res, opts = {}) {
+  sendCors(req, res);
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+  const url = req.url ?? "";
+  traceUi(opts, `${req.method ?? "GET"} ${url}`);
+  if (url === "/api/pool" && (req.method === "GET" || req.method === "POST")) {
+    void handlePoolApi(req, res);
+  } else if (url === "/api/config" && req.method === "GET") {
+    handleGetConfig(res);
+  } else if (url === "/api/update-status" && req.method === "GET") {
+    handleGetUpdateStatus(res);
+  } else if (url === "/api/config" && req.method === "POST") {
+    handlePostConfig(req, res);
+  } else if (url.startsWith("/api/models") && req.method === "GET") {
+    const appId = new URL(url, "http://localhost").searchParams.get("appId") ?? "";
+    handleGetModels(res, APP_ID_TO_LAUNCH_TARGET[appId], appId === "codex-subagents", opts.uiMode);
+  } else if (url === "/api/keys" && req.method === "POST") {
+    handlePostKeys(req, res);
+  } else if (url === "/api/providers/refresh" && req.method === "POST") {
+    handleProviderRefresh(req, res);
+  } else if (url === "/api/providers/models/test" && req.method === "POST") {
+    handleTestModel(req, res);
+  } else if (url === "/api/providers/refresh-all" && req.method === "POST") {
+    handleRefreshAll(res);
+  } else if (url === "/api/providers/templates" && req.method === "GET") {
+    handleGetTemplates(res);
+  } else if (url === "/api/providers/add" && req.method === "POST") {
+    handleAddProvider(req, res);
+  } else if (url === "/api/providers/add-custom" && req.method === "POST") {
+    handleAddCustomProvider(req, res);
+  } else if (url === "/api/providers/edit-custom" && req.method === "POST") {
+    handleEditCustomProvider(req, res);
+  } else if (url === "/api/intelligence/status" && req.method === "GET") {
+    handleIntelligenceStatus(res);
+  } else if (url === "/api/intelligence/key" && req.method === "POST") {
+    handleIntelligenceKey(req, res);
+  } else if (url === "/api/intelligence/refresh" && req.method === "POST") {
+    handleIntelligenceRefresh(res);
+  } else if (url === "/api/intelligence/remove" && req.method === "POST") {
+    handleIntelligenceRemove(res);
+  } else if (url === "/api/providers/edit-url" && req.method === "POST") {
+    handleEditServerUrl(req, res);
+  } else if (url === "/api/providers/rename" && req.method === "POST") {
+    handleRenameProvider(req, res);
+  } else if (url === "/api/providers/delete" && req.method === "POST") {
+    handleDeleteProvider(req, res);
+  } else if (url === "/api/providers/models/add" && req.method === "POST") {
+    handleManualModel(req, res, "add");
+  } else if (url === "/api/providers/models/remove" && req.method === "POST") {
+    handleManualModel(req, res, "remove");
+  } else if (url === "/api/providers/models/hide" && req.method === "POST") {
+    handleHideModel(req, res);
+  } else if (url === "/api/providers/models/mark-free" && req.method === "POST") {
+    handleMarkModelFree(req, res);
+  } else if (url === "/api/providers/models/context" && req.method === "POST") {
+    handleSetContextWindow(req, res);
+  } else if (url === "/api/providers/models/kind" && req.method === "POST") {
+    handleSetModelKind(req, res);
+  } else if (url === "/api/providers/models/hide-many" && req.method === "POST") {
+    handleHideManyModels(req, res);
+  } else if (url === "/api/providers/models/measure-context" && req.method === "POST") {
+    handleMeasureContextWindow(req, res);
+  } else if (url === "/api/providers/oauth/start" && req.method === "POST") {
+    handleOAuthStart(req, res, opts);
+  } else if (url === "/api/providers/oauth/code" && req.method === "POST") {
+    handleOAuthCode(req, res);
+  } else if (url.startsWith("/api/providers/oauth/status") && req.method === "GET") {
+    handleOAuthStatus(req, res);
+  } else if (url.startsWith("/oauth/callback") && req.method === "GET") {
+    handleOAuthCallback(req, res);
+  } else if (url.startsWith("/api/apps")) {
+    if (opts.uiMode === "server") {
+      sendJson(res, 403, { error: "App launch is unavailable in server admin UI mode." });
+      return;
+    }
+    if (url === "/api/apps" && req.method === "GET") handleGetApps(res);
+    else if (url === "/api/apps/path" && req.method === "POST") handleSetAppPath(req, res);
+    else if (url === "/api/apps/launch" && req.method === "POST") handleLaunchApp(req, res, opts);
+    else if (url === "/api/apps/browse-folder" && req.method === "POST") handleBrowseFolder(res);
+    else sendJson(res, 404, { error: "Not found" });
+  } else if (url === "/api/server/status" && req.method === "GET") {
+    handleGetServerStatus(req, res);
+  } else if (url === "/api/server/providers" && req.method === "GET") {
+    handleGetServerProviders(res);
+  } else if (url === "/api/server/start" && req.method === "POST") {
+    handleStartServer(req, res, opts);
+  } else if (url === "/api/server/stop" && req.method === "POST") {
+    handleStopServer(res, opts);
+  } else if (url === "/api/server/config" && req.method === "POST") {
+    handlePostServerConfig(req, res);
+  } else {
+    sendJson(res, 404, { error: "Not found" });
+  }
+}
+async function handleGetUpdateStatus(res) {
+  sendJson(res, 200, await checkForUpdates());
+}
+function handleGetConfig(res) {
+  const prefs = loadPreferences();
+  sendJson(res, 200, {
+    favoriteModels: prefs.favoriteModels ?? [],
+    freePoolMembers: prefs.freePool?.members ?? [],
+    freePoolEnabled: prefs.freePool?.enabled === true,
+    codexSubagentModels: prefs.codexSubagentModels ?? [],
+    trustSystemCertificates: getTrustSystemCertificates(),
+    systemCertificatesSupported: isSystemCaSupported() || isSystemCaActive(),
+    trustSystemCertificatesNotice: TRUST_SYSTEM_CERTS_NOTICE
+  });
+}
+async function handlePostConfig(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    const update = {};
+    if (Array.isArray(body.favoriteModels)) update.favoriteModels = body.favoriteModels;
+    if (Array.isArray(body.codexSubagentModels)) {
+      const normalized = normalizeFavoriteModels(body.codexSubagentModels, CODEX_SUBAGENT_MODEL_CAP + 1);
+      if (normalized.length > CODEX_SUBAGENT_MODEL_CAP) {
+        sendJson(res, 400, { error: "Codex Sub-agents are limited to 1 model" });
+        return;
+      }
+      update.codexSubagentModels = normalized;
+    }
+    if (Object.keys(update).length > 0) savePreferences(update);
+    if (typeof body.trustSystemCertificates === "boolean") {
+      if (body.trustSystemCertificates) {
+        const applied = applySystemCaTrust();
+        if (!applied.ok) {
+          sendJson(res, 400, { error: applied.reason ?? "Could not trust system certificates." });
+          return;
+        }
+      } else {
+        revertSystemCaTrust();
+      }
+      setTrustSystemCertificates(body.trustSystemCertificates);
+    }
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    sendJson(res, 400, { error: String(err) });
+  }
+}
+function keyAccountFields(entry) {
+  if (!entry || entry.authType === "oauth") return {};
+  const template = getTemplateById(entry.templateId);
+  if (!template || !supportsAdditionalApiAccounts(template) || template.accountIdPrompt || template.urlPrompt) return {};
+  return { canAddKeyAccount: true, templateId: template.id };
+}
+function canAddAccountField(providerId, authType, uiMode) {
+  const kind = providerKind(providerId);
+  return authType === "oauth" && supportsAdditionalOAuthAccounts(kind) && canStartOAuthFromUi(providerId, uiMode) ? { canAddAccount: true } : {};
+}
+function accountFieldFrom(label) {
+  return label ? { account: label } : {};
+}
+function accountField(p2) {
+  if (p2.authType !== "oauth" || isProviderKind(p2.id, "github-copilot")) return {};
+  return accountFieldFrom(formatOAuthAccount(describeOAuthAccount({
+    kind: p2.id,
+    accountId: p2.oauthAccountId,
+    providerData: p2.providerData,
+    accessToken: p2.apiKey
+  })));
+}
+async function handleGetModels(res, target, codexSubagents = false, uiMode) {
+  try {
+    const includeHidden = !target && !codexSubagents;
+    let catalog = (await fetchModelsWithTimeout(includeHidden ? { includeHidden: true } : void 0)).filter((provider) => provider.authType !== "oauth" || isUiCatalogOAuthProvider(provider.id, uiMode));
+    if (codexSubagents) catalog = providersForCodexSubagents(catalog);
+    else if (target) catalog = providersForTarget(catalog, target);
+    const registry = loadRegistry();
+    const registryById = new Map(registry.providers.map((p2) => [p2.id, p2]));
+    const manualIdsByProvider = new Map(registry.providers.map((p2) => [
+      p2.id,
+      new Set(getProviderModels(p2).filter((m) => m.source === "manual").map((m) => m.id))
+    ]));
+    const intelligenceFor = buildIntelligenceLookup(loadIntelligenceCache());
+    const estimatedIdsByProvider = new Map(registry.providers.map((rp) => [rp.id, new Map(getProviderModels(rp).filter((m) => m.contextWindowSource === void 0 || m.contextWindowSource === "models.dev").map((m) => [m.id, m.contextWindowSource === "models.dev" ? "models.dev" : "name"]))]));
+    const manualMetadata = (id) => {
+      const provider = registryById.get(id);
+      return {
+        supportsManualModels: provider ? provider.enabled && supportsManualModels(provider) : false,
+        ...provider && canEditServerUrl(provider) ? { canEditServerUrl: true, serverUrl: provider.api.url ?? "" } : {},
+        manualModels: (provider?.manualModels ?? []).map(publicManualModel)
+      };
+    };
+    const customById = new Map(
+      registry.providers.filter((rp) => rp.templateId === "custom-openai" || rp.templateId === "custom-anthropic").map((rp) => [rp.id, {
+        kind: rp.templateId === "custom-anthropic" ? "anthropic" : "openai",
+        baseUrl: rp.api.url ?? "",
+        headers: rp.api.headers ?? {}
+      }])
+    );
+    const providers = catalog.map((p2) => ({
+      id: p2.id,
+      name: p2.name,
+      favoriteName: favoriteProviderDisplayName(p2),
+      hasKey: Boolean(p2.apiKey),
+      freeAccess: !p2.apiKey && (() => {
+        const t = registry.providers.find((rp) => rp.id === p2.id)?.templateId ?? p2.id;
+        const { getTemplateById: getTemplateById2 } = (init_provider_templates(), __toCommonJS(provider_templates_exports));
+        return getTemplateById2(t)?.anonymousFreeModels === true;
+      })(),
+      authType: p2.authType ?? "api",
+      ...accountField(p2),
+      ...canAddAccountField(p2.id, p2.authType, uiMode),
+      ...keyAccountFields(registry.providers.find((rp) => rp.id === p2.id)),
+      ...manualMetadata(p2.id),
+      // Count the same usable models shown below, not raw speech/guard/blocked entries.
+      modelCount: p2.models.filter((m) => !m.hidden).length,
+      ...isProviderKind(p2.id, "github-copilot") ? { subscription: copilotSubscription(p2.providerData) } : {},
+      ...customById.has(p2.id) ? { customEndpoint: customById.get(p2.id) } : {},
+      models: p2.models.map((m) => ({
+        id: m.id,
+        name: m.name,
+        isFree: m.isFree ?? false,
+        freeStatus: m.freeStatus,
+        freeLabel: m.userMarkedFree ? "Free (marked by you)" : m.localEndpoint ? "Free (local)" : freeStatusLabel(m.freeStatus),
+        ...m.userMarkedFree ? { userMarkedFree: true } : {},
+        contextWindow: m.contextWindow,
+        ...intelligenceFor(m.id) ? { intelligence: { score: intelligenceFor(m.id).score, name: intelligenceFor(m.id).name } } : {},
+        cost: m.cost,
+        referencePrice: m.referencePrice,
+        claudeTransparentCompatible: supportsClaudeTransparentMode(m),
+        ...m.hidden ? { hidden: true } : {},
+        ...modelKindFields(registryById.get(p2.id), m.id),
+        ...m.contextWindow !== void 0 && estimatedIdsByProvider.get(p2.id)?.has(m.id) ? { contextWindowEstimate: estimatedIdsByProvider.get(p2.id).get(m.id) } : {},
+        ...registryById.get(p2.id)?.contextWindowOverrides?.[m.id] ? { contextWindowOverride: registryById.get(p2.id).contextWindowOverrides[m.id].source } : {},
+        ...registryById.get(p2.id)?.modelTestResults?.[m.id] ? { testResult: registryById.get(p2.id).modelTestResults[m.id] } : {},
+        ...manualIdsByProvider.get(p2.id)?.has(m.id) ? { source: "manual" } : {}
+      }))
+    }));
+    const materializedIds = new Set(catalog.map((p2) => p2.id));
+    for (const rp of registry.providers) {
+      if (rp.authType !== "oauth" || !isUiCatalogOAuthProvider(rp.id, uiMode) || !rp.enabled || materializedIds.has(rp.id)) continue;
+      let credential = null;
+      let signInIssue;
+      try {
+        credential = await resolveProviderCredential(rp.id, rp.authRef);
+      } catch (err) {
+        signInIssue = (err instanceof Error ? err.message : String(err)).replace(/\.?\s*Sign in again: relay-ai providers auth \S+/, "").slice(0, 200);
+      }
+      if (!credential && signInIssue === void 0) continue;
+      const needsSignIn = !credential;
+      providers.push({
+        id: rp.id,
+        name: rp.name,
+        favoriteName: favoriteProviderDisplayName({ id: rp.id, name: rp.name, authType: rp.authType, nameCustomized: rp.nameCustomized }),
+        hasKey: !needsSignIn,
+        // Keep an expired account on the page so it can be signed in again, renamed or removed.
+        ...needsSignIn ? { needsSignIn: true, signInIssue } : {},
+        freeAccess: false,
+        authType: "oauth",
+        ...isProviderKind(rp.id, "github-copilot") ? {} : accountFieldFrom(await readOAuthAccountLabel(rp)),
+        ...canAddAccountField(rp.id, "oauth", uiMode),
+        ...manualMetadata(rp.id),
+        modelCount: needsSignIn ? getAgentProviderModels(rp).length : 0,
+        ...isProviderKind(rp.id, "github-copilot") && !needsSignIn ? { subscription: copilotSubscription(void 0) } : {},
+        models: []
+      });
+    }
+    if (!target && !codexSubagents) {
+      for (const rp of registry.providers) {
+        if (!rp.enabled || !supportsManualModels(rp) || materializedIds.has(rp.id) || getProviderModels(rp).length !== 0) continue;
+        const credential = await resolveProviderCredential(rp.id, rp.authRef).catch(() => null);
+        providers.push({
+          id: rp.id,
+          name: rp.name,
+          favoriteName: favoriteProviderDisplayName({ id: rp.id, name: rp.name, authType: rp.authType, nameCustomized: rp.nameCustomized }),
+          hasKey: Boolean(credential),
+          freeAccess: false,
+          authType: rp.authType ?? "api",
+          modelCount: 0,
+          ...manualMetadata(rp.id),
+          ...customById.has(rp.id) ? { customEndpoint: customById.get(rp.id) } : {},
+          models: []
+        });
+      }
+    }
+    if (target === "claude" || target === "codex") {
+      const pool = parseFreePool(loadPreferences().freePool);
+      const entry = pool.enabled ? poolCatalogEntry(pool, pool.receipts, target) : void 0;
+      if (entry) providers.push({
+        id: "relay-free-pool",
+        name: "Relay Free Pool",
+        favoriteName: "Relay Free Pool",
+        hasKey: true,
+        authType: "none",
+        modelCount: 1,
+        models: [{
+          id: "relay-free-pool",
+          name: "Relay Free Pool",
+          contextWindow: entry.context_window,
+          freeStatus: "verified_free",
+          isFree: true,
+          cost: { input: 0, output: 0 }
+        }]
+      });
+    }
+    sendJson(res, 200, { providers });
+  } catch (err) {
+    sendCatalogFetchError(res, err, "Model fetch");
+  }
+}
+function publicManualModel(model) {
+  return {
+    id: model.id,
+    name: model.name,
+    contextWindow: model.contextWindow,
+    validatedAt: model.validatedAt,
+    source: "manual"
+  };
+}
+async function handleHideModel(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    if (typeof body.providerId !== "string" || !body.providerId.trim() || typeof body.modelId !== "string" || !body.modelId.trim() || typeof body.hidden !== "boolean") {
+      sendJson(res, 400, { ok: false, error: "providerId, modelId and hidden (true/false) are required" });
+      return;
+    }
+    const result = setModelHidden(body.providerId.trim(), body.modelId.trim(), body.hidden);
+    sendJson(res, result.ok ? 200 : 404, result);
+  } catch {
+    sendJson(res, 400, { ok: false, error: "Request body must be valid JSON" });
+  }
+}
+async function handleMarkModelFree(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    if (typeof body.providerId !== "string" || !body.providerId.trim() || typeof body.modelId !== "string" || !body.modelId.trim() || typeof body.free !== "boolean") {
+      sendJson(res, 400, { ok: false, error: "providerId, modelId and free (true/false) are required" });
+      return;
+    }
+    const result = setModelMarkedFree(body.providerId.trim(), body.modelId.trim(), body.free);
+    sendJson(res, result.ok ? 200 : 404, result);
+  } catch {
+    sendJson(res, 400, { ok: false, error: "Request body must be valid JSON" });
+  }
+}
+function modelKindFields(provider, modelId) {
+  if (!provider) return {};
+  const manual = provider.modelKindOverrides?.[modelId];
+  if (manual) return { kind: manual, kindSource: "manual" };
+  if (provider.nonChatModelIds?.includes(modelId)) return { kind: "not-chat", kindSource: "test" };
+  const guessed = guessModelKindFromName(modelId);
+  if (provider.chatModelIds?.includes(modelId)) {
+    return nameKindOutranksChatTest(guessed) ? { kind: guessed, kindSource: "name" } : { kind: "chat", kindSource: "test" };
+  }
+  const known = modelsDevModelKind(provider.id, modelId);
+  if (known) return { kind: known, kindSource: "models.dev" };
+  return guessed ? { kind: guessed, kindSource: "name" } : {};
+}
+async function handleSetModelKind(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    if (typeof body.providerId !== "string" || typeof body.modelId !== "string" || body.kind !== null && (typeof body.kind !== "string" || !MODEL_KINDS.includes(body.kind))) {
+      sendJson(res, 400, { ok: false, error: `providerId, modelId and kind (${MODEL_KINDS.join(", ")}, or null to reset) are required` });
+      return;
+    }
+    const result = setModelKindOverride(body.providerId, body.modelId, body.kind);
+    sendJson(res, result.ok ? 200 : 400, result);
+  } catch {
+    sendJson(res, 400, { ok: false, error: "Request body must be valid JSON" });
+  }
+}
+async function handleHideManyModels(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    if (typeof body.providerId !== "string" || typeof body.hidden !== "boolean" || !Array.isArray(body.modelIds) || !body.modelIds.every((id) => typeof id === "string")) {
+      sendJson(res, 400, { ok: false, error: "providerId, modelIds (list) and hidden (true/false) are required" });
+      return;
+    }
+    const result = setModelsHidden(body.providerId, body.modelIds, body.hidden);
+    sendJson(res, result.ok ? 200 : 404, result);
+  } catch {
+    sendJson(res, 400, { ok: false, error: "Request body must be valid JSON" });
+  }
+}
+async function handleSetContextWindow(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    if (typeof body.providerId !== "string" || !body.providerId.trim() || typeof body.modelId !== "string" || !body.modelId.trim() || body.contextWindow !== null && typeof body.contextWindow !== "number") {
+      sendJson(res, 400, { ok: false, error: "providerId, modelId and contextWindow (a number, or null to reset) are required" });
+      return;
+    }
+    const result = setContextWindowOverride(body.providerId.trim(), body.modelId.trim(), body.contextWindow, "user");
+    sendJson(res, result.ok ? 200 : 400, result);
+  } catch {
+    sendJson(res, 400, { ok: false, error: "Request body must be valid JSON" });
+  }
+}
+async function handleMeasureContextWindow(req, res) {
+  let body;
+  try {
+    body = JSON.parse(await readBody(req));
+  } catch {
+    sendJson(res, 400, { ok: false, error: "Request body must be valid JSON" });
+    return;
+  }
+  if (typeof body.providerId !== "string" || typeof body.modelId !== "string") {
+    sendJson(res, 400, { ok: false, error: "providerId and modelId required" });
+    return;
+  }
+  const provider = loadRegistry().providers.find((p2) => p2.id === body.providerId);
+  const cachedModel = provider?.enabled ? getProviderModels(provider).find((model) => model.id === body.modelId) : void 0;
+  if (!provider || !cachedModel) {
+    sendJson(res, 400, { ok: false, error: "Model is unavailable." });
+    return;
+  }
+  if (!customEndpointKind(provider) && !isFreeStatus(classifyFreeStatus({ model: cachedModel, providerId: provider.id, templateId: provider.templateId }))) {
+    sendJson(res, 400, { ok: false, error: "Measuring context sizes is only available for custom endpoints and free models." });
+    return;
+  }
+  const controller = new AbortController();
+  res.on("close", () => {
+    if (!res.writableEnded) controller.abort();
+  });
+  try {
+    const { checkContextWindow } = await import("./test-model-VP4EAJMT.js");
+    const context = await checkContextWindow(provider.id, body.modelId, controller.signal);
+    if (!res.destroyed) sendJson(res, 200, { ok: true, context });
+  } catch {
+    if (!res.destroyed) sendJson(res, 200, { ok: false, error: "Could not check this model." });
+  }
+}
+async function handleManualModel(req, res, action) {
+  let body;
+  try {
+    const parsed = JSON.parse(await readBody(req));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("object required");
+    body = parsed;
+  } catch {
+    sendJson(res, 400, { ok: false, error: "Request body must be a JSON object" });
+    return;
+  }
+  const { providerId, modelId, displayName, contextWindow } = body;
+  if (typeof providerId !== "string" || !providerId.trim() || typeof modelId !== "string" || !modelId.trim()) {
+    sendJson(res, 400, { ok: false, error: "providerId and modelId must be non-empty strings" });
+    return;
+  }
+  if (action === "add" && (displayName !== void 0 && typeof displayName !== "string" || contextWindow !== void 0 && (typeof contextWindow !== "number" || !Number.isSafeInteger(contextWindow) || contextWindow <= 0))) {
+    sendJson(res, 400, { ok: false, error: "displayName must be a string and contextWindow must be a positive integer when provided" });
+    return;
+  }
+  try {
+    const { addManualModel, removeManualModel } = await import("./manual-models-AAS2HYAL.js");
+    const result = action === "add" ? await addManualModel({
+      providerId: providerId.trim(),
+      modelId: modelId.trim(),
+      ...typeof displayName === "string" && displayName.trim() ? { displayName: displayName.trim() } : {},
+      ...typeof contextWindow === "number" ? { contextWindow } : {}
+    }) : removeManualModel(providerId.trim(), modelId.trim());
+    sendJson(res, 200, {
+      ok: result.ok,
+      ...!result.ok ? { error: result.error ?? "Manual model operation failed" } : {},
+      ...result.ok && "model" in result && result.model ? { model: publicManualModel(result.model) } : {}
+    });
+  } catch {
+    sendJson(res, 500, { ok: false, error: `Unable to ${action} manual model. Please try again.` });
+  }
+}
+function copilotSubscription(providerData) {
+  const tier = copilotPlanTier(providerData);
+  if (tier === "free") return { tier, label: "Copilot Free" };
+  if (tier === "paid") return { tier, label: "Copilot Paid" };
+  return { tier, label: "Plan unverified" };
+}
+async function handlePostKeys(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    const { providerId, key, confirmOverwrite } = body;
+    if (!providerId || typeof providerId !== "string") {
+      sendJson(res, 400, { error: "providerId required" });
+      return;
+    }
+    if (!key || typeof key !== "string" || key.trim().length === 0) {
+      sendJson(res, 400, { error: "key must be a non-empty string" });
+      return;
+    }
+    const numberedOpencode = ["zen", "go"].includes(providerKind(providerId)) && providerKind(providerId) !== providerId;
+    const ownAuthRef = numberedOpencode ? loadRegistry().providers.find((p2) => p2.id === providerId)?.authRef : void 0;
+    const authRef = preferredRelayCredentialAuthRef(providerId, ownAuthRef ?? `keyring:provider:${providerId}`);
+    const existing = await readStoredProviderCredential(authRef) ?? (providerId === "go" || providerId === "zen" ? await readStoredProviderCredential("keyring:global:opencode") : null);
+    if (existing && existing !== key.trim() && confirmOverwrite !== true) {
+      sendJson(res, 409, { ok: false, needsConfirmation: true, error: "A different key is already stored in Relay." });
+      return;
+    }
+    const saved = await saveProviderCredential(authRef, key.trim());
+    if (saved) {
+      const stored = await readStoredProviderCredential(authRef);
+      if (stored !== key.trim()) {
+        sendJson(res, 500, { ok: false, error: "The replacement key could not be read back. It has not been verified as saved." });
+        return;
+      }
+      const registryProvider = loadRegistry().providers.find((p2) => p2.id === providerId);
+      if (registryProvider) {
+        const effective = await resolveProviderCredential(providerId, registryProvider.authRef);
+        if (effective !== key.trim()) {
+          sendJson(res, 409, { ok: false, error: "Key saved, but another credential setting overrides it. Tests and launches would still use that other credential." });
+          return;
+        }
+      }
+      sendJson(res, 200, { ok: true });
+    } else {
+      sendJson(res, 500, { error: "Credential store unavailable \u2014 key not saved" });
+    }
+  } catch (err) {
+    sendJson(res, 400, { error: "Could not save and verify the provider key." });
+  }
+}
+var CUSTOM_TEMPLATES = [
+  { id: "__custom_openai__", name: "Custom OpenAI-compatible", signupUrl: null, authType: "api", custom: true },
+  { id: "__custom_anthropic__", name: "Custom Anthropic-compatible", signupUrl: null, authType: "api", custom: true }
+];
+function handleGetTemplates(res) {
+  const registry = loadRegistry();
+  const configured = new Set(registry.providers.map((p2) => p2.id));
+  const templates = /* @__PURE__ */ new Map();
+  const apiTemplates = listAddableTemplates(configured).map((t) => ({
+    id: t.id,
+    name: t.name,
+    signupUrl: t.signupUrl ?? null,
+    authType: t.authType,
+    anonymousFreeModels: t.anonymousFreeModels ?? false,
+    urlPrompt: t.urlPrompt ?? null,
+    accountIdPrompt: t.accountIdPrompt ?? null,
+    defaultBaseUrl: t.defaultBaseUrl ?? null,
+    apiKeyOptional: t.apiKeyOptional ?? false,
+    noApiKey: t.noApiKey ?? false,
+    setupNote: t.setupNote ?? null,
+    authMethods: t.authMethods ?? [t.authType],
+    custom: false
+  }));
+  for (const template of apiTemplates) templates.set(template.id, template);
+  const oauthTemplates = listVisibleOAuthTemplates(configured).map((t) => ({
+    id: t.id,
+    name: t.name,
+    signupUrl: t.signupUrl ?? null,
+    authType: t.authType,
+    authMethods: t.authMethods ?? [t.authType],
+    subscriptionRisk: t.subscriptionRisk ?? false,
+    custom: false
+  }));
+  for (const template of oauthTemplates) {
+    const existing = templates.get(template.id);
+    if (existing) {
+      templates.set(template.id, {
+        ...existing,
+        authMethods: [.../* @__PURE__ */ new Set([...existing.authMethods ?? [], ...template.authMethods ?? []])],
+        subscriptionRisk: template.subscriptionRisk
+      });
+    } else {
+      templates.set(template.id, template);
+    }
+  }
+  const configuredKinds = new Set(registry.providers.map((p2) => providerKind(p2.id)));
+  for (const t of listAccountTemplates()) {
+    if (t.addable === false || ["zen", "go"].includes(t.id) || !configuredKinds.has(t.id)) continue;
+    templates.set(t.id, {
+      id: t.id,
+      name: t.name,
+      signupUrl: t.signupUrl ?? null,
+      authType: t.authType,
+      anonymousFreeModels: t.anonymousFreeModels ?? false,
+      urlPrompt: t.urlPrompt ?? null,
+      accountIdPrompt: t.accountIdPrompt ?? null,
+      defaultBaseUrl: t.defaultBaseUrl ?? null,
+      apiKeyOptional: t.apiKeyOptional ?? false,
+      noApiKey: t.noApiKey ?? false,
+      setupNote: t.setupNote ?? null,
+      authMethods: t.authMethods ?? [t.authType],
+      custom: false,
+      addAnother: true
+    });
+  }
+  for (const t of [...listVisibleOAuthTemplates(), ...getTemplateById("cline-pass") ? [getTemplateById("cline-pass")] : []]) {
+    if (templates.has(t.id) || !configuredKinds.has(t.id) || !supportsAdditionalOAuthAccounts(t.id)) continue;
+    templates.set(t.id, {
+      id: t.id,
+      name: t.name,
+      signupUrl: t.signupUrl ?? null,
+      authType: t.authType,
+      authMethods: t.authMethods ?? [t.authType],
+      subscriptionRisk: t.subscriptionRisk ?? false,
+      custom: false,
+      addAnother: true,
+      oauthOnlyAdd: true
+    });
+  }
+  const sorted = [...templates.values()].sort((a, b) => a.name.localeCompare(b.name, void 0, { sensitivity: "base", numeric: true }));
+  sendJson(res, 200, { templates: [...sorted, ...CUSTOM_TEMPLATES] });
+}
+async function handleAddCustomProvider(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    const { kind, displayName, baseUrl, apiKey = "", headers, confirmDuplicate } = body;
+    if (kind !== "openai" && kind !== "anthropic") {
+      sendJson(res, 400, { error: 'kind must be "openai" or "anthropic"' });
+      return;
+    }
+    if (!displayName?.trim()) {
+      sendJson(res, 400, { error: "displayName required" });
+      return;
+    }
+    if (!baseUrl?.trim()) {
+      sendJson(res, 400, { error: "baseUrl required" });
+      return;
+    }
+    const result = await addCustomEndpointProvider({
+      kind,
+      displayName: displayName.trim(),
+      baseUrl: baseUrl.trim(),
+      apiKey: apiKey.trim(),
+      allowInsecureLocal: true,
+      headers: headers && Object.keys(headers).length > 0 ? headers : void 0,
+      confirmDuplicate: confirmDuplicate === true
+    });
+    if (result.added) {
+      sendJson(res, 200, {
+        ok: true,
+        name: displayName.trim(),
+        count: result.modelCount ?? 0,
+        ...result.incomplete ? { incomplete: result.incomplete } : {}
+      });
+    } else {
+      sendJson(res, 200, {
+        ok: false,
+        error: result.error,
+        hint: result.hint,
+        ...result.code ? { code: result.code } : {},
+        ...result.duplicateOf ? { duplicateOf: result.duplicateOf } : {}
+      });
+    }
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+async function handleEditCustomProvider(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    if (!body.providerId?.trim()) {
+      sendJson(res, 400, { error: "providerId required" });
+      return;
+    }
+    const result = await updateCustomEndpointProvider({
+      providerId: body.providerId.trim(),
+      displayName: body.displayName?.trim(),
+      baseUrl: body.baseUrl?.trim(),
+      apiKey: body.apiKey?.trim(),
+      headers: body.headers,
+      allowInsecureLocal: true,
+      saveAnyway: body.saveAnyway === true
+    });
+    if (result.updated) {
+      sendJson(res, 200, {
+        ok: true,
+        name: result.provider?.name ?? body.providerId,
+        count: result.modelCount ?? 0,
+        ...result.modelsStale ? { modelsStale: true } : {},
+        ...result.incomplete ? { incomplete: result.incomplete } : {}
+      });
+    } else {
+      sendJson(res, 200, {
+        ok: false,
+        error: result.error,
+        hint: result.hint,
+        ...result.code ? { code: result.code } : {},
+        ...result.canSaveAnyway ? { canSaveAnyway: true } : {}
+      });
+    }
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+async function handleAddProvider(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    const { templateId, key, baseUrl, accountId } = body;
+    if (!templateId || typeof templateId !== "string") {
+      sendJson(res, 400, { error: "templateId required" });
+      return;
+    }
+    const { listSupportedTemplates, listAccountTemplates: listAccountTemplates2 } = await import("./provider-templates-A3OEDC5Y.js");
+    const addAccount = body.addAccount === true;
+    const template = (addAccount ? listAccountTemplates2() : listSupportedTemplates()).find((t) => t.id === templateId) ?? (addAccount ? listSupportedTemplates().find((t) => t.id === templateId) : void 0);
+    if (!template) {
+      sendJson(res, 404, { error: `Template '${templateId}' not found` });
+      return;
+    }
+    if (addAccount && !supportsAdditionalApiAccounts(template)) {
+      sendJson(res, 400, { error: `A second account is not available for ${template.name}.` });
+      return;
+    }
+    const rawKey = typeof key === "string" ? key.trim() : "";
+    if (!rawKey && !template.anonymousFreeModels && !template.apiKeyOptional) {
+      sendJson(res, 400, { error: "key must be a non-empty string" });
+      return;
+    }
+    const keyText = template.apiKeyOptional && !rawKey && !template.anonymousFreeModels ? template.id : rawKey;
+    let baseUrlOverride;
+    if (template.accountIdPrompt) {
+      const rawAccountId = typeof accountId === "string" ? accountId.trim() : "";
+      if (!rawAccountId) {
+        sendJson(res, 400, { error: "accountId required" });
+        return;
+      }
+      baseUrlOverride = template.defaultBaseUrl?.replace("{ACCOUNT_ID}", rawAccountId);
+    } else if (template.urlPrompt) {
+      baseUrlOverride = typeof baseUrl === "string" ? baseUrl.trim() : "";
+      if (!baseUrlOverride) {
+        sendJson(res, 400, { error: "baseUrl required" });
+        return;
+      }
+      const usesHttp = /^http:\/\//i.test(baseUrlOverride);
+      const valid = await validateCustomEndpointUrl(baseUrlOverride, { allowInsecureLocal: usesHttp });
+      if (!valid.ok) {
+        sendJson(res, 400, { error: valid.error ?? "Invalid URL", hint: valid.hint });
+        return;
+      }
+    }
+    const replaceExisting = template.id === "cline-pass" && body.replaceExisting === true;
+    const result = await addProviderFromTemplate(template, keyText, {
+      baseUrl: baseUrlOverride,
+      replaceExisting,
+      ...addAccount ? { addAccount: true } : {}
+    });
+    if (result.added) {
+      sendJson(res, 200, { ok: true, name: result.addedNames?.join(" + ") ?? result.provider?.name ?? template.name, count: result.modelCount ?? 0, ...result.notice ? { notice: result.notice } : {} });
+    } else {
+      sendJson(res, 200, { ok: false, error: result.error, hint: result.hint, ...result.code ? { code: result.code } : {} });
+    }
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+async function handleRefreshAll(res) {
+  try {
+    const result = await refreshAllProviderModels(async (provider) => {
+      if (!provider.authRef) return null;
+      return resolveProviderCredential(provider.id, provider.authRef);
+    });
+    const summary = result.refreshed.map((r) => {
+      const isOAuthExpected = !r.ok && !r.skipped && r.reason?.includes("OAuth token");
+      return {
+        id: r.id,
+        name: r.name,
+        ok: r.ok || isOAuthExpected,
+        count: r.modelCount ?? r.previousModelCount ?? 0,
+        skipped: r.skipped ?? isOAuthExpected,
+        oauthWarning: isOAuthExpected,
+        reason: r.reason
+      };
+    });
+    sendJson(res, 200, { ok: true, providers: summary, total: summary.reduce((n, p2) => n + p2.count, 0) });
+  } catch (err) {
+    sendJson(res, 500, { ok: false, error: String(err) });
+  }
+}
+async function handleTestModel(req, res) {
+  let body;
+  try {
+    body = JSON.parse(await readBody(req));
+  } catch {
+    sendJson(res, 400, { ok: false, error: "Invalid request." });
+    return;
+  }
+  if (!body || typeof body.providerId !== "string" || !body.providerId.trim() || typeof body.modelId !== "string" || !body.modelId.trim()) {
+    sendJson(res, 400, { ok: false, error: "providerId and modelId required" });
+    return;
+  }
+  const controller = new AbortController();
+  const cancel = () => {
+    if (!res.writableEnded) controller.abort();
+  };
+  res.on("close", cancel);
+  try {
+    const { testModel } = await import("./test-model-VP4EAJMT.js");
+    const result = await testModel(body.providerId.trim(), body.modelId.trim(), controller.signal);
+    if (!controller.signal.aborted) {
+      try {
+        recordModelTestResult(body.providerId.trim(), body.modelId.trim(), result.ok ? { ok: true, latencyMs: result.latencyMs, toolsPassed: result.toolsPassed } : { ok: false, ...result.error ? { error: result.error } : {}, ..."transient" in result && result.transient ? { transient: true } : {} });
+      } catch {
+      }
+    }
+    if (!result.ok) invalidateUiPoolMember(body.providerId.trim(), body.modelId.trim());
+    let context;
+    if (result.ok && !controller.signal.aborted) {
+      try {
+        const provider = loadRegistry().providers.find((p2) => p2.id === body.providerId.trim());
+        const cachedModel = provider ? getProviderModels(provider).find((m) => m.id === body.modelId.trim()) : void 0;
+        if (provider && cachedModel) {
+          const probeAllowed = customEndpointKind(provider) || isFreeStatus(classifyFreeStatus({ model: cachedModel, providerId: provider.id, templateId: provider.templateId }));
+          if (probeAllowed || providerKind(provider.id) === "ollama") {
+            const { checkContextWindow } = await import("./test-model-VP4EAJMT.js");
+            context = await checkContextWindow(provider.id, cachedModel.id, controller.signal, { lookupOnly: !probeAllowed });
+          }
+        }
+      } catch {
+      }
+    }
+    const poolResult = result.ok ? await verifyUiPoolMember(body.providerId.trim(), body.modelId.trim(), controller.signal, { evidence: { text: "passed", tools: result.toolsPassed ? "passed" : "failed" } }) : void 0;
+    if (!res.destroyed) sendJson(res, 200, { ...result, ...context ? { context } : {}, ...poolResult ? { pool: poolResult } : {} });
+  } catch {
+    if (!res.destroyed) sendJson(res, 500, { ok: false, error: "Model test failed. Try again." });
+  } finally {
+    res.removeListener("close", cancel);
+  }
+}
+async function handleProviderRefresh(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    const { providerId } = body;
+    if (!providerId || typeof providerId !== "string") {
+      sendJson(res, 400, { error: "providerId required" });
+      return;
+    }
+    const registry = loadRegistry();
+    const registryProvider = registry.providers.find((p2) => p2.id === providerId);
+    if (!registryProvider) {
+      sendJson(res, 200, { ok: false, error: "Provider not found in registry" });
+      return;
+    }
+    const explicitKey = typeof body.key === "string" ? body.key.trim() : "";
+    const apiKey = explicitKey || await resolveProviderCredential(providerId, registryProvider.authRef);
+    const result = await refreshProviderModels(providerId, apiKey, registry);
+    if (result.ok) {
+      sendJson(res, 200, { ok: true, count: result.modelCount ?? result.previousModelCount ?? 0 });
+    } else {
+      sendJson(res, 200, { ok: false, error: result.reason ?? "Refresh failed" });
+    }
+  } catch (err) {
+    sendJson(res, 200, { ok: false, error: String(err) });
+  }
+}
+var intelligenceRefreshing = false;
+async function intelligenceStatusBody() {
+  const cache = loadIntelligenceCache();
+  return {
+    hasKey: await hasIntelligenceKey(),
+    fetchedAt: cache?.fetchedAt && cache.models.length > 0 ? cache.fetchedAt : null,
+    modelCount: cache?.models.length ?? 0,
+    indexVersion: cache?.indexVersion ?? null,
+    refreshing: intelligenceRefreshing,
+    sourceUrl: AA_SITE_URL
+  };
+}
+function handleIntelligenceStatus(res) {
+  void (async () => {
+    const body = await intelligenceStatusBody();
+    if (body.hasKey && !intelligenceRefreshing && isIntelligenceStale(loadIntelligenceCache())) {
+      intelligenceRefreshing = true;
+      void refreshIntelligence().catch(() => {
+      }).finally(() => {
+        intelligenceRefreshing = false;
+      });
+    }
+    sendJson(res, 200, { ...body, refreshing: intelligenceRefreshing });
+  })();
+}
+async function handleIntelligenceKey(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    const key = typeof body.key === "string" ? body.key.trim() : "";
+    if (!key) {
+      sendJson(res, 400, { ok: false, error: "Paste your Artificial Analysis API key." });
+      return;
+    }
+    const { fetchIntelligenceScores, saveIntelligenceKey: save } = await import("./artificial-analysis-RQHGPA6D.js");
+    const cache = await fetchIntelligenceScores(key);
+    if (!await save(key)) {
+      sendJson(res, 200, { ok: false, error: "Could not store the key in the system credential store." });
+      return;
+    }
+    const { writeIntelligenceCache } = await import("./artificial-analysis-RQHGPA6D.js");
+    writeIntelligenceCache(cache);
+    sendJson(res, 200, { ok: true, ...await intelligenceStatusBody() });
+  } catch (err) {
+    sendJson(res, 200, { ok: false, error: err instanceof IntelligenceError ? err.message : "Could not check the key." });
+  }
+}
+async function handleIntelligenceRefresh(res) {
+  try {
+    intelligenceRefreshing = true;
+    await refreshIntelligence();
+    sendJson(res, 200, { ok: true, ...await intelligenceStatusBody() });
+  } catch (err) {
+    sendJson(res, 200, { ok: false, error: err instanceof IntelligenceError ? err.message : "Refresh failed." });
+  } finally {
+    intelligenceRefreshing = false;
+  }
+}
+async function handleIntelligenceRemove(res) {
+  await removeIntelligence();
+  sendJson(res, 200, { ok: true, ...await intelligenceStatusBody() });
+}
+function canEditServerUrl(provider) {
+  if (customEndpointKind(provider)) return false;
+  const template = getTemplateById(provider.templateId ?? providerKind(provider.id));
+  return Boolean(template?.urlPrompt && !template.accountIdPrompt);
+}
+async function handleEditServerUrl(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    if (typeof body.providerId !== "string" || typeof body.baseUrl !== "string" || !body.baseUrl.trim()) {
+      sendJson(res, 400, { ok: false, error: "providerId and baseUrl required" });
+      return;
+    }
+    const registry = loadRegistry();
+    const provider = registry.providers.find((p2) => p2.id === body.providerId);
+    if (!provider || !canEditServerUrl(provider)) {
+      sendJson(res, 400, { ok: false, error: "This provider has no server address to edit." });
+      return;
+    }
+    const newUrl = body.baseUrl.trim().replace(/\/+$/, "");
+    const valid = await validateCustomEndpointUrl(newUrl, { allowInsecureLocal: /^http:\/\//i.test(newUrl) });
+    if (!valid.ok) {
+      sendJson(res, 400, { ok: false, error: valid.error ?? "Invalid URL", hint: valid.hint });
+      return;
+    }
+    const { setProviderServerUrl } = await import("./crud-CZERRPL5.js");
+    const previous = provider.api.url ?? "";
+    if (previous.replace(/\/+$/, "") === newUrl) {
+      sendJson(res, 200, { ok: true, unchanged: true });
+      return;
+    }
+    setProviderServerUrl(provider.id, newUrl);
+    const apiKey = await resolveProviderCredential(provider.id, provider.authRef);
+    const refreshed = await refreshProviderModels(provider.id, apiKey, loadRegistry());
+    if (!refreshed.ok) {
+      setProviderServerUrl(provider.id, previous);
+      sendJson(res, 200, { ok: false, error: refreshed.reason ?? "Could not read models from that address." });
+      return;
+    }
+    sendJson(res, 200, { ok: true, count: refreshed.modelCount ?? 0 });
+  } catch (err) {
+    sendJson(res, 200, { ok: false, error: err instanceof Error ? err.message : "Could not change the address." });
+  }
+}
+async function handleRenameProvider(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    const providerId = typeof body.providerId === "string" ? body.providerId.trim() : "";
+    if (!providerId || typeof body.name !== "string") {
+      sendJson(res, 400, { error: "providerId and name required" });
+      return;
+    }
+    const result = renameProvider(providerId, body.name);
+    if (result.renamed) {
+      sendJson(res, 200, { ok: true, name: result.name });
+    } else {
+      sendJson(res, 200, { ok: false, error: result.error });
+    }
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+async function handleDeleteProvider(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    const { providerId } = body;
+    if (!providerId || typeof providerId !== "string") {
+      sendJson(res, 400, { error: "providerId required" });
+      return;
+    }
+    const result = await removeProviderFromRegistry(providerId);
+    if (result.removed) {
+      sendJson(res, 200, { ok: true, name: result.name });
+    } else {
+      sendJson(res, 200, { ok: false, error: result.error ?? "Provider not found" });
+    }
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+var DEVICE_CODE_PROVIDER_IDS = /* @__PURE__ */ new Set(["xai-oauth", "openai-oauth", "github-copilot", "cline-pass"]);
+var PKCE_PROVIDER_IDS = /* @__PURE__ */ new Set(["claude-code", "antigravity"]);
+function canStartOAuthFromUi(providerId, uiMode) {
+  const kind = providerKind(providerId);
+  if (DEVICE_CODE_PROVIDER_IDS.has(kind)) return true;
+  return uiMode !== "server" && PKCE_PROVIDER_IDS.has(kind);
+}
+function isUiCatalogOAuthProvider(providerId, uiMode) {
+  const kind = providerKind(providerId);
+  if (DEVICE_CODE_PROVIDER_IDS.has(kind)) return true;
+  if (uiMode === "server") return false;
+  return PKCE_PROVIDER_IDS.has(kind);
+}
+async function refreshOAuthProviderModels(providerId) {
+  const registry = loadRegistry();
+  const entry = registry.providers.find((p2) => p2.id === providerId);
+  if (!entry) return;
+  const apiKey = await resolveProviderCredential(providerId, entry.authRef);
+  await refreshProviderModels(providerId, apiKey, registry);
+}
+async function handleOAuthStart(req, res, opts = {}) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    const { providerId } = body;
+    if (!providerId || !canStartOAuthFromUi(providerId, opts.uiMode)) {
+      sendJson(res, 400, { error: "Unsupported OAuth provider." });
+      return;
+    }
+    const kind = providerKind(providerId);
+    const addAccount = body.addAccount === true;
+    if (addAccount && !supportsAdditionalOAuthAccounts(kind)) {
+      sendJson(res, 400, { error: "A second account for this provider is not available yet." });
+      return;
+    }
+    const sessionId = randomUUID();
+    if (kind === "xai-oauth") {
+      const device = await requestXaiDeviceCode();
+      const url = device.verification_uri_complete ?? device.verification_uri;
+      const session2 = { status: "pending", url, userCode: device.user_code, providerId };
+      oauthSessions.set(sessionId, session2);
+      pollXaiDeviceCodeToken(device).then(async (tokens) => {
+        const savedId = await saveNativeOAuthCredential(providerId, tokens, void 0, void 0, { addAccount });
+        await refreshOAuthProviderModels(typeof savedId === "string" ? savedId : providerId);
+        oauthSessions.set(sessionId, { ...session2, status: "done" });
+      }).catch((err) => {
+        oauthSessions.set(sessionId, { ...session2, status: "error", error: err instanceof Error ? err.message : String(err) });
+      });
+      sendJson(res, 200, { sessionId, url, userCode: device.user_code });
+      return;
+    }
+    if (kind === "github-copilot") {
+      const device = await requestGithubDeviceCode();
+      const url = device.verification_uri;
+      const session2 = { status: "pending", url, userCode: device.user_code, providerId };
+      oauthSessions.set(sessionId, session2);
+      pollGithubDeviceCodeToken(device).then(async (tokens) => {
+        const savedId = await saveNativeOAuthCredential(providerId, tokens, void 0, void 0, { addAccount });
+        await refreshOAuthProviderModels(typeof savedId === "string" ? savedId : providerId);
+        oauthSessions.set(sessionId, { ...session2, status: "done" });
+      }).catch((err) => {
+        oauthSessions.set(sessionId, { ...session2, status: "error", error: err instanceof Error ? err.message : String(err) });
+      });
+      sendJson(res, 200, { sessionId, url, userCode: device.user_code });
+      return;
+    }
+    if (kind === "cline-pass") {
+      const device = await requestClinePassDeviceCode();
+      const url = device.verification_uri_complete ?? device.verification_uri;
+      const session2 = { status: "pending", url, userCode: device.user_code, providerId };
+      oauthSessions.set(sessionId, session2);
+      pollClinePassDeviceCode(device).then(async (result) => {
+        const savedId = await saveNativeOAuthCredential(providerId, result.tokens, result.accountId, result.providerData, { addAccount });
+        await refreshOAuthProviderModels(typeof savedId === "string" ? savedId : providerId);
+        oauthSessions.set(sessionId, { ...session2, status: "done" });
+      }).catch((err) => {
+        oauthSessions.set(sessionId, { ...session2, status: "error", error: err instanceof Error ? err.message : String(err) });
+      });
+      sendJson(res, 200, { sessionId, url, userCode: device.user_code });
+      return;
+    }
+    if (PKCE_PROVIDER_IDS.has(kind)) {
+      if (body.acceptRisk !== true) {
+        sendJson(res, 200, { needsConfirmation: true, risk: subscriptionOAuthRiskLines(kind) });
+        return;
+      }
+      if (kind === "claude-code") {
+        const { authUrl: authUrl2, codeVerifier: codeVerifier2, oauthState: oauthState2, redirectUri: redirectUri2 } = await buildClaudeCodeAuthUrl();
+        const session3 = {
+          status: "pending",
+          url: authUrl2,
+          providerId,
+          codeVerifier: codeVerifier2,
+          oauthState: oauthState2,
+          redirectUri: redirectUri2,
+          awaitsCode: true
+        };
+        oauthSessions.set(sessionId, session3);
+        const codePromise2 = new Promise((resolve, reject) => {
+          session3.codeResolver = resolve;
+          session3.errorRejecter = (err) => reject(new Error(err));
+          setTimeout(() => reject(new Error("OAuth timeout \u2014 sign-in not completed")), 10 * 60 * 1e3);
+        });
+        codePromise2.then(async (code) => {
+          const { tokens, bootstrap } = await completeClaudeCodeExchange(code, codeVerifier2, oauthState2, redirectUri2);
+          const savedId = await saveNativeOAuthCredential(
+            providerId,
+            tokens,
+            bootstrap.accountId,
+            claudeCodeProviderData(bootstrap),
+            { addAccount }
+          );
+          await refreshOAuthProviderModels(typeof savedId === "string" ? savedId : providerId);
+          oauthSessions.set(sessionId, { ...session3, status: "done" });
+        }).catch((err) => {
+          oauthSessions.set(sessionId, { ...session3, status: "error", error: err instanceof Error ? err.message : String(err) });
+        });
+        sendJson(res, 200, { sessionId, authUrl: authUrl2, pkce: true, needsCode: true });
+        return;
+      }
+      const host = req.headers.host ?? "127.0.0.1";
+      const redirectUri = guiCallbackRedirectUri(host);
+      let pkce;
+      if (kind === "antigravity") {
+        pkce = await buildAntigravityAuthUrl(redirectUri);
+      } else {
+        sendJson(res, 400, { error: `PKCE flow for "${providerId}" not yet implemented` });
+        return;
+      }
+      const { authUrl, codeVerifier, oauthState } = pkce;
+      const session2 = {
+        status: "pending",
+        url: authUrl,
+        providerId,
+        codeVerifier,
+        oauthState
+      };
+      oauthSessions.set(sessionId, session2);
+      const codePromise = new Promise((resolve, reject) => {
+        session2.codeResolver = resolve;
+        session2.errorRejecter = (err) => reject(new Error(err));
+        setTimeout(() => reject(new Error("OAuth timeout \u2014 sign-in not completed")), 10 * 60 * 1e3);
+      });
+      oauthSessions.set(sessionId, session2);
+      codePromise.then(async (code) => {
+        let providerData = {};
+        let accountId;
+        let tokens;
+        if (kind === "antigravity") {
+          const result = await completeAntigravityExchange(code, codeVerifier, redirectUri);
+          tokens = result.tokens;
+          accountId = result.userInfo.email;
+          if (result.projectId) providerData.projectId = result.projectId;
+          if (result.tierId) providerData.tier = result.tierId;
+        } else {
+          throw new Error(`Unknown PKCE provider: ${providerId}`);
+        }
+        const savedId = await saveNativeOAuthCredential(providerId, tokens, accountId, providerData, { addAccount });
+        await refreshOAuthProviderModels(typeof savedId === "string" ? savedId : providerId);
+        oauthSessions.set(sessionId, { ...session2, status: "done" });
+      }).catch((err) => {
+        oauthSessions.set(sessionId, { ...session2, status: "error", error: err instanceof Error ? err.message : String(err) });
+      });
+      sendJson(res, 200, { sessionId, authUrl, pkce: true });
+      return;
+    }
+    const auth = await buildOpenAiBrowserAuthUrl();
+    const session = {
+      status: "pending",
+      url: auth.authUrl,
+      providerId,
+      codeVerifier: auth.codeVerifier,
+      oauthState: auth.oauthState,
+      redirectUri: auth.redirectUri,
+      callbackServer: auth.callbackServer
+    };
+    oauthSessions.set(sessionId, session);
+    auth.callbackServer.waitForCallback().then(async (callback) => {
+      if (callback.error) throw new Error(`OpenAI authorization failed: ${callback.error}`);
+      if (!callback.state || callback.state !== auth.oauthState) throw new Error("OpenAI returned an unexpected OAuth state");
+      if (!callback.code) throw new Error("OpenAI did not return an authorization code");
+      return exchangeOpenAiBrowserCode(callback.code, auth.codeVerifier, auth.redirectUri);
+    }).then(async ({ tokens, accountId }) => {
+      const savedId = await saveNativeOAuthCredential(providerId, tokens, accountId, void 0, { addAccount });
+      await refreshOAuthProviderModels(typeof savedId === "string" ? savedId : providerId);
+      auth.callbackServer.close();
+      oauthSessions.set(sessionId, { ...session, status: "done" });
+    }).catch((err) => {
+      auth.callbackServer.close();
+      oauthSessions.set(sessionId, { ...session, status: "error", error: err instanceof Error ? err.message : String(err) });
+    });
+    sendJson(res, 200, { sessionId, authUrl: auth.authUrl, pkce: true });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+var MAX_PASTED_CODE_LENGTH = 4e3;
+async function handleOAuthCode(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+    const code = typeof body.code === "string" ? body.code.trim() : "";
+    if (!sessionId || !code || code.length > MAX_PASTED_CODE_LENGTH) {
+      sendJson(res, 400, { error: "sessionId and a code are required." });
+      return;
+    }
+    const session = oauthSessions.get(sessionId);
+    if (!session) {
+      sendJson(res, 404, { error: "Session not found or expired" });
+      return;
+    }
+    if (!session.awaitsCode || session.status !== "pending" || !session.codeResolver) {
+      sendJson(res, 400, { error: "This sign-in is not waiting for a code." });
+      return;
+    }
+    session.awaitsCode = false;
+    session.codeResolver(code);
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+function handleOAuthStatus(req, res) {
+  const searchParams = new URL(req.url ?? "", "http://localhost").searchParams;
+  const sessionId = searchParams.get("sessionId") ?? "";
+  const session = oauthSessions.get(sessionId);
+  if (!session) {
+    sendJson(res, 404, { error: "Session not found or expired" });
+    return;
+  }
+  sendJson(res, 200, { status: session.status, error: session.error });
+  if (session.status !== "pending") oauthSessions.delete(sessionId);
+}
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function callbackPage(type, message) {
+  const icon = type === "success" ? "&#10003;" : "&#10007;";
+  const color = type === "success" ? "#22c55e" : "#ef4444";
+  const title = type === "success" ? "Authentication successful" : "Authentication failed";
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title></head>
+<body style="font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0">
+<div style="text-align:center;padding:2rem;background:#fff;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.1);max-width:400px">
+<div style="color:${color};font-size:2.5rem">${icon}</div>
+<h1 style="margin:.5rem 0">${title}</h1>
+<p style="color:#666">${escapeHtml(message)}</p>
+</div></body></html>`;
+}
+function handleOAuthCallback(req, res) {
+  const sp = new URL(req.url ?? "", "http://localhost").searchParams;
+  const code = sp.get("code") ?? "";
+  const state = sp.get("state") ?? "";
+  const error = sp.get("error") ?? "";
+  let matchedSession;
+  for (const session of oauthSessions.values()) {
+    if (session.oauthState === state) {
+      matchedSession = session;
+      break;
+    }
+  }
+  if (!matchedSession) {
+    res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(callbackPage("error", "Unknown or expired OAuth session. Please try signing in again."));
+    return;
+  }
+  if (error) {
+    matchedSession.errorRejecter?.(error);
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(callbackPage("error", `Authorization denied: ${error}`));
+    return;
+  }
+  if (!code) {
+    matchedSession.errorRejecter?.("No authorization code received");
+    res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(callbackPage("error", "No authorization code received. Please try again."));
+    return;
+  }
+  matchedSession.codeResolver?.(code);
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(callbackPage("success", "You can close this tab and return to relay-ai."));
+}
+function handleGetApps(res) {
+  try {
+    const apps = getSupportedApps();
+    sendJson(res, 200, { apps, recentLaunchFolders: loadPreferences().recentLaunchFolders ?? [] });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+var APP_ID_TO_LAUNCH_TARGET = {
+  claude: "claude",
+  "claude-app": "claude-app",
+  codex: "codex",
+  "codex-app": "codex-app",
+  gemini: "gemini",
+  agy: "antigravity",
+  antigravity: "antigravity",
+  "antigravity-ide": "antigravity"
+};
+async function handleLaunchApp(req, res, opts) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    const { appId, favorites, cwd } = body;
+    const httpProxy = body.httpProxy === true;
+    const withNative = body.withNative === true;
+    const pool = body.pool === true;
+    if (body.pool !== void 0 && typeof body.pool !== "boolean") {
+      sendJson(res, 400, { error: "pool must be a boolean" });
+      return;
+    }
+    if (pool && (!["claude", "codex"].includes(body.appId) || body.favorites || body.providerId || body.modelId || body.httpProxy || body.withNative)) {
+      sendJson(res, 400, { error: "Choose the free pool alone for Claude Code CLI or Codex CLI." });
+      return;
+    }
+    let { providerId, modelId } = body;
+    if (!appId) {
+      sendJson(res, 400, { error: "Missing appId" });
+      return;
+    }
+    if (!getSupportedApp(appId)) {
+      sendJson(res, 400, { error: `Unknown app: ${appId}` });
+      return;
+    }
+    if (body.httpProxy !== void 0 && typeof body.httpProxy !== "boolean") {
+      sendJson(res, 400, { error: "httpProxy must be true or false." });
+      return;
+    }
+    if (body.withNative !== void 0 && typeof body.withNative !== "boolean") {
+      sendJson(res, 400, { error: "withNative must be true or false." });
+      return;
+    }
+    if (withNative && appId !== "codex" && appId !== "codex-app") {
+      sendJson(res, 400, { error: "Native Codex mixed mode is available only for Codex CLI and ChatGPT Desktop." });
+      return;
+    }
+    if (httpProxy && appId !== "claude") {
+      sendJson(res, 400, { error: "Anthropic + Relay mode is available only for Claude Code CLI." });
+      return;
+    }
+    const { installed, path } = detectApp(appId);
+    if (!installed || !path) {
+      sendJson(res, 400, { error: `App ${appId} is not installed on this system.` });
+      return;
+    }
+    if (!favorites && (providerId || modelId) && (!providerId || !modelId)) {
+      sendJson(res, 400, { error: "Both providerId and modelId are required to launch a specific Relay model." });
+      return;
+    }
+    if (httpProxy && providerId && modelId) {
+      let catalog;
+      try {
+        catalog = await fetchModelsWithTimeout();
+      } catch (err) {
+        sendCatalogFetchError(res, err, "Model validation");
+        return;
+      }
+      const selectedModel = catalog.find((provider) => provider.id === providerId)?.models.find((model) => model.id === modelId);
+      if (!selectedModel || !supportsClaudeTransparentMode(selectedModel)) {
+        sendJson(res, 400, {
+          error: "The selected model cannot be combined with your Anthropic login."
+        });
+        return;
+      }
+    }
+    if (favorites && !httpProxy && !providerId && !modelId) {
+      const prefs = loadPreferences();
+      const favList = prefs.favoriteModels ?? [];
+      if (favList.length > 0) {
+        providerId = favList[0].providerId;
+        modelId = favList[0].modelId;
+      }
+    }
+    const launchFolder = typeof cwd === "string" && cwd.trim() ? cwd.trim() : void 0;
+    if (launchFolder) {
+      try {
+        if (!statSync(launchFolder).isDirectory()) {
+          sendJson(res, 400, { error: "Launch folder must be a directory." });
+          return;
+        }
+      } catch {
+        sendJson(res, 400, { error: "Launch folder does not exist." });
+        return;
+      }
+      recordLaunchFolder(launchFolder);
+    }
+    const launchCmd = getRelayLaunchCommand(appId, {
+      pool,
+      providerId,
+      modelId,
+      cwd: launchFolder,
+      trace: opts.trace,
+      httpProxy,
+      ...withNative ? { withNative: true } : {}
+    });
+    traceUi(
+      opts,
+      `launch app=${appId} provider=${providerId ?? ""} model=${modelId ?? ""} favorites=${Boolean(favorites)} http-proxy=${httpProxy} resolved-from-favorites=${Boolean(favorites && providerId)} cwd=${launchFolder ?? ""} command=${launchCmd}`
+    );
+    exec(launchCmd, (err) => {
+      if (err) {
+        traceUi(opts, `launch error app=${appId} error=${err.message}`);
+        console.error("Failed to spawn native terminal window:", err);
+      }
+    });
+    sendJson(res, 200, { ok: true, command: launchCmd });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+async function handleSetAppPath(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    const { appId, path } = body;
+    if (!appId || typeof appId !== "string") {
+      sendJson(res, 400, { error: "Missing appId" });
+      return;
+    }
+    if (path !== null && (typeof path !== "string" || !path.trim())) {
+      sendJson(res, 400, { error: "path must be a non-empty string, or null to clear the override." });
+      return;
+    }
+    const trimmed = typeof path === "string" ? path.trim() : null;
+    if (trimmed && !existsSync2(trimmed)) {
+      sendJson(res, 400, { error: "That path does not exist." });
+      return;
+    }
+    setAppPathOverride(appId, trimmed);
+    sendJson(res, 200, { ok: true, apps: getSupportedApps() });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+async function handleGetServerStatus(req, res) {
+  try {
+    sendJson(res, 200, await getServerStatus({ requestHost: hostFromHeader(req.headers.host) }));
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+async function handleGetServerProviders(res) {
+  try {
+    const catalog = await fetchModelsWithTimeout({ agent: "server" });
+    sendJson(res, 200, { providers: providerOptionsFromCatalog(catalog) });
+  } catch (err) {
+    sendCatalogFetchError(res, err, "Provider fetch");
+  }
+}
+async function handleStartServer(req, res, opts) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    if (typeof body.favoritesOnly !== "boolean") {
+      sendJson(res, 400, { error: "favoritesOnly must be a boolean" });
+      return;
+    }
+    if (typeof body.maskGatewayIds !== "boolean") {
+      sendJson(res, 400, { error: "maskGatewayIds must be a boolean" });
+      return;
+    }
+    if (body.listenMode !== "local" && body.listenMode !== "network") {
+      sendJson(res, 400, { error: 'listenMode must be "local" or "network"' });
+      return;
+    }
+    const listenMode = opts.uiMode === "server" ? "network" : body.listenMode;
+    const request = {
+      favoritesOnly: body.favoritesOnly,
+      freeModelsOnly: Boolean(body.freeModelsOnly),
+      exposedProviders: Array.isArray(body.exposedProviders) ? body.exposedProviders : null,
+      maskGatewayIds: body.maskGatewayIds,
+      listenMode,
+      autostart: typeof body.autostart === "boolean" ? body.autostart : void 0,
+      passwordMode: body.passwordMode === "saved" ? "saved" : "new",
+      password: typeof body.password === "string" ? body.password : void 0,
+      savePassword: Boolean(body.savePassword)
+    };
+    const result = await startGatewayServer(request, {
+      requestHost: hostFromHeader(req.headers.host)
+    });
+    if (result.ok) {
+      notifyServerLifecycle(opts, {
+        type: "started",
+        listenMode: request.listenMode,
+        modelCount: result.status.models?.length ?? 0
+      });
+    }
+    sendJson(res, 200, result);
+  } catch (err) {
+    sendJson(res, 500, { ok: false, error: String(err) });
+  }
+}
+async function handlePostServerConfig(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req));
+    if (typeof body.autostart === "boolean") {
+      setServerAutostart(body.autostart);
+    }
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    sendJson(res, 400, { error: String(err) });
+  }
+}
+async function handleStopServer(res, opts) {
+  try {
+    const result = await stopGatewayServer();
+    if (result.stopped) notifyServerLifecycle(opts, { type: "stopped" });
+    sendJson(res, 200, result);
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+async function handleBrowseFolder(res) {
+  try {
+    let resultPath = "";
+    const isMac2 = process.platform === "darwin";
+    const isWindows2 = process.platform === "win32";
+    if (isMac2) {
+      const script = 'POSIX path of (choose folder with prompt "Select launch folder:")';
+      try {
+        const { stdout } = await execAsync(`osascript -e '${script}'`);
+        resultPath = stdout.trim();
+      } catch (err) {
+        if (err.code === 1 || String(err.stderr).includes("-128") || String(err.stdout).includes("-128")) {
+          sendJson(res, 200, { ok: true, canceled: true });
+          return;
+        }
+        throw err;
+      }
+    } else if (isWindows2) {
+      const psCommand = [
+        "try {",
+        "  Add-Type -AssemblyName System.Windows.Forms",
+        "  $f = New-Object System.Windows.Forms.FolderBrowserDialog",
+        '  $f.Description = "Select launch folder"',
+        "  $owner = New-Object System.Windows.Forms.Form",
+        "  $owner.TopMost = $true",
+        "  $owner.ShowInTaskbar = $false",
+        '  $owner.FormBorderStyle = "None"',
+        "  $owner.Opacity = 0",
+        "  $owner.Width = 1",
+        "  $owner.Height = 1",
+        '  $owner.StartPosition = "CenterScreen"',
+        "  $owner.Show()",
+        "  $owner.Activate()",
+        '  if ($f.ShowDialog($owner) -eq "OK") { $f.SelectedPath }',
+        "  $owner.Close()",
+        "} catch {",
+        "  [Console]::Error.WriteLine($_.Exception.Message)",
+        "  exit 1",
+        "}"
+      ].join("\n");
+      try {
+        const encoded = Buffer.from(psCommand, "utf16le").toString("base64");
+        const { stdout } = await execAsync(`powershell -NoProfile -Sta -EncodedCommand ${encoded}`);
+        resultPath = stdout.trim();
+      } catch (err) {
+        sendJson(res, 500, { error: `Failed to open folder picker: ${err instanceof Error ? err.message : String(err)}` });
+        return;
+      }
+    } else {
+      try {
+        const { stdout } = await execAsync('zenity --file-selection --directory --title="Select launch folder"');
+        resultPath = stdout.trim();
+      } catch {
+        try {
+          const { stdout } = await execAsync("kdialog --getexistingdirectory .");
+          resultPath = stdout.trim();
+        } catch {
+          sendJson(res, 500, { error: "No GUI folder picker available on this platform" });
+          return;
+        }
+      }
+    }
+    if (!resultPath) {
+      sendJson(res, 200, { ok: true, canceled: true });
+      return;
+    }
+    sendJson(res, 200, { ok: true, path: resultPath });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+
+// src/ui-command.ts
+var __dirname = dirname(fileURLToPath(import.meta.url));
+var PUBLIC_DIR = join2(__dirname, "ui", "public");
+var LOCK_FILE = join2(getAppHome(), "ui.lock");
+var DEFAULT_SERVER_UI_PORT = 8787;
+var MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml"
+};
+function ext(path) {
+  const i = path.lastIndexOf(".");
+  return i >= 0 ? path.slice(i) : "";
+}
+function resolveUiMode(opts = {}, env = process.env) {
+  if (opts.serverMode) return "server";
+  return env.RELAY_AI_UI_MODE === "server" ? "server" : "full";
+}
+function resolveServerUiPort(opts, env) {
+  if (opts.port != null) return opts.port;
+  const envPort = Number(env.RELAY_AI_UI_PORT);
+  return Number.isFinite(envPort) && envPort > 0 ? envPort : DEFAULT_SERVER_UI_PORT;
+}
+function resolveUiRuntimeConfig(opts = {}, env = process.env) {
+  const mode = resolveUiMode(opts, env);
+  if (mode === "server") {
+    return {
+      mode,
+      host: "0.0.0.0",
+      port: resolveServerUiPort(opts, env),
+      openBrowser: false,
+      confirmShutdownOnSigint: false
+    };
+  }
+  return {
+    mode,
+    host: "127.0.0.1",
+    port: opts.port ?? 0,
+    openBrowser: true,
+    confirmShutdownOnSigint: true
+  };
+}
+function buildStaticCache(mode) {
+  const cache = /* @__PURE__ */ new Map();
+  try {
+    for (const name of readdirSync(PUBLIC_DIR)) {
+      const mime = MIME[ext(name)];
+      if (!mime) continue;
+      const raw = readFileSync(join2(PUBLIC_DIR, name));
+      let content = raw;
+      if (name === "index.html") {
+        content = Buffer.from(
+          raw.toString("utf8").replaceAll("{{VERSION}}", VERSION).replaceAll("{{UI_MODE}}", mode)
+        );
+      }
+      cache.set(`/${name}`, { content, mime });
+    }
+  } catch {
+  }
+  return cache;
+}
+function removeLock() {
+  try {
+    unlinkSync(LOCK_FILE);
+  } catch {
+  }
+}
+async function probeServerHealth(port) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 500);
+    const res = await fetch(`http://127.0.0.1:${port}/api/config`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (res.status === 200) {
+      const data = await res.json().catch(() => null);
+      if (data && typeof data === "object") return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+async function checkExistingServer() {
+  if (!existsSync3(LOCK_FILE)) return null;
+  try {
+    const { pid, port } = JSON.parse(readFileSync(LOCK_FILE, "utf8"));
+    if (pid === process.pid) {
+      removeLock();
+      return null;
+    }
+    process.kill(pid, 0);
+    const isAlive = await probeServerHealth(port ?? DEFAULT_SERVER_UI_PORT);
+    if (!isAlive) {
+      removeLock();
+      return null;
+    }
+    return `http://127.0.0.1:${port}`;
+  } catch {
+    removeLock();
+    return null;
+  }
+}
+function isUiApiRoute(url) {
+  return url.startsWith("/api/") || url.startsWith("/oauth/callback");
+}
+function formatUiServerLifecycleMessage(event) {
+  if (event.type === "stopped") return "\u25C7 Server Gateway stopped";
+  const mode = event.listenMode === "network" ? "Network" : "Local";
+  const modelLabel = event.modelCount === 1 ? "model" : "models";
+  return `\u25C6 Server Gateway started \xB7 ${mode} mode \xB7 ${event.modelCount} ${modelLabel} exposed`;
+}
+async function resolveUiShutdownDecision(signal, promptClose = () => p.confirm({
+  message: "Relay-AI UI is still running. Close it?",
+  initialValue: true
+}), opts) {
+  const confirmOnSigint = opts?.confirmOnSigint !== false;
+  if (signal !== "SIGINT" || !confirmOnSigint) return "close";
+  const shouldClose = await promptClose();
+  if (p.isCancel(shouldClose)) return "close";
+  return shouldClose ? "close" : "keep";
+}
+async function runUiCommand(opts = {}) {
+  const runtime = resolveUiRuntimeConfig(opts);
+  await ensureOpencodeCloudProviders();
+  const existing = await checkExistingServer();
+  if (existing) {
+    console.log(`
+  ${pc.bold("relay-ai UI")} already running at ${pc.cyan(existing)}
+`);
+    return 0;
+  }
+  if (opts.trace) {
+    process.env.RELAY_AI_TRACE = "1";
+  }
+  const staticCache = buildStaticCache(runtime.mode);
+  const traceLogPath = opts.trace ? getUiDebugLogPath() : void 0;
+  const trace = traceLogPath ? makeTraceLogger(traceLogPath) : void 0;
+  trace?.(`ui server starting mode=${runtime.mode}`);
+  const server = createServer((req, res) => {
+    const url2 = req.url ?? "/";
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    if (isUiApiRoute(url2)) {
+      handleUiApiRequest(req, res, {
+        trace: opts.trace,
+        traceLogPath,
+        uiMode: runtime.mode,
+        onServerLifecycle: (event) => {
+          console.log(`
+  ${formatUiServerLifecycleMessage(event)}
+`);
+        }
+      });
+      return;
+    }
+    const key = url2 === "/" ? "/index.html" : url2.split("?")[0];
+    trace?.(`static ${req.method ?? "GET"} ${url2} -> ${key}`);
+    const cached = staticCache.get(key);
+    if (cached) {
+      res.writeHead(200, { "Content-Type": cached.mime });
+      res.end(cached.content);
+      return;
+    }
+    res.writeHead(404);
+    res.end("Not found");
+  });
+  await new Promise((resolve, reject) => {
+    server.listen(runtime.port, runtime.host, () => resolve());
+    server.once("error", reject);
+  });
+  const addr = server.address();
+  if (!addr || typeof addr === "string") {
+    console.error("Failed to bind server");
+    return 1;
+  }
+  const port = addr.port;
+  const displayHost = runtime.host === "0.0.0.0" ? "127.0.0.1" : runtime.host;
+  const url = `http://${displayHost}:${port}`;
+  mkdirSync(getAppHome(), { recursive: true });
+  writeFileSync2(LOCK_FILE, JSON.stringify({ pid: process.pid, port, mode: runtime.mode }));
+  if (resolveServerAutostart()) {
+    startGatewayServerFromSavedConfig().catch((err) => {
+      trace?.(`gateway autostart error: ${err instanceof Error ? err.message : String(err)}`);
+    });
+  }
+  const cleanup = () => {
+    removeLock();
+    server.close();
+    process.exit(0);
+  };
+  let handlingSignal = false;
+  const handleSignal = async (signal) => {
+    if (handlingSignal) return;
+    handlingSignal = true;
+    const decision = await resolveUiShutdownDecision(
+      signal,
+      void 0,
+      { confirmOnSigint: runtime.confirmShutdownOnSigint }
+    );
+    if (decision === "keep") {
+      handlingSignal = false;
+      return;
+    }
+    cleanup();
+  };
+  process.on("SIGINT", () => {
+    void handleSignal("SIGINT");
+  });
+  process.on("SIGTERM", () => {
+    void handleSignal("SIGTERM");
+  });
+  const modeLabel = runtime.mode === "server" ? " (server admin)" : "";
+  console.log(`
+  ${pc.bold("relay-ai UI")}${modeLabel}  ${pc.cyan(url)}
+  ${pc.dim("Press Ctrl+C to stop")}
+`);
+  if (runtime.mode === "server") {
+    console.log(`  ${pc.dim("Gateway API (when started from Server tab): http://127.0.0.1:17645")}
+`);
+  }
+  if (traceLogPath) {
+    console.log(`  ${pc.dim(`Trace log: ${traceLogPath}`)}
+`);
+    trace?.(`ui server listening ${url}`);
+  }
+  if (runtime.openBrowser) {
+    try {
+      const { default: open } = await import("open");
+      await open(url);
+      trace?.(`browser open ${url}`);
+    } catch {
+      trace?.(`browser open failed ${url}`);
+    }
+  }
+  await new Promise(() => {
+  });
+  return 0;
+}
+export {
+  checkExistingServer,
+  formatUiServerLifecycleMessage,
+  isUiApiRoute,
+  probeServerHealth,
+  resolveUiMode,
+  resolveUiRuntimeConfig,
+  resolveUiShutdownDecision,
+  runUiCommand
+};
+//# sourceMappingURL=ui-command-JRTNTKJY.js.map

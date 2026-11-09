@@ -1,6 +1,8 @@
-// openai.ts — native OpenAI ChatGPT Plus/Pro OAuth (device code, ported from OpenCode)
+// openai.ts — native OpenAI ChatGPT Plus/Pro OAuth (browser PKCE + device fallback)
 
-import { positiveSecondsToMs, sleepMs } from './pkce.js';
+import { positiveSecondsToMs, sleepMs, generatePkce, generateOAuthState } from './pkce.js';
+import { startCallbackServer, type CallbackServer } from './callback-server.js';
+import open from 'open';
 import type { OAuthTokenResponse } from './types.js';
 import { VERSION } from '../constants.js';
 import { postOAuthRefresh } from './refresh-http.js';
@@ -21,6 +23,70 @@ export interface OpenAiDeviceCodeData {
   user_code: string;
   interval: string;
   expires_in?: number;
+}
+
+export interface OpenAiBrowserAuthParams {
+  authUrl: string;
+  codeVerifier: string;
+  oauthState: string;
+  redirectUri: string;
+  callbackServer: CallbackServer;
+}
+
+/** Build the same localhost browser login used by the official Codex client. */
+export async function buildOpenAiBrowserAuthUrl(): Promise<OpenAiBrowserAuthParams> {
+  const callbackServer = await startCallbackServer(1455);
+  const { verifier, challenge } = await generatePkce();
+  const oauthState = generateOAuthState();
+  const redirectUri = callbackServer.redirectUri.replace('/callback', '/auth/callback');
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: CLIENT_ID,
+    redirect_uri: redirectUri,
+    scope: 'openid profile email offline_access api.connectors.read api.connectors.invoke',
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    state: oauthState,
+    id_token_add_organizations: 'true',
+    codex_cli_simplified_flow: 'true',
+    originator: `relay-ai/${VERSION}`,
+  });
+  return { authUrl: `${ISSUER}/oauth/authorize?${params}`, codeVerifier: verifier, oauthState, redirectUri, callbackServer };
+}
+
+export async function exchangeOpenAiBrowserCode(
+  code: string,
+  codeVerifier: string,
+  redirectUri: string,
+): Promise<{ tokens: OAuthTokenResponse; accountId?: string }> {
+  const response = await fetch(`${ISSUER}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: CLIENT_ID,
+      code,
+      redirect_uri: redirectUri,
+      code_verifier: codeVerifier,
+    }).toString(),
+  });
+  if (!response.ok) throw new Error(`OpenAI token exchange failed (${response.status})`);
+  const tokens = await response.json() as OAuthTokenResponse;
+  return { tokens, accountId: extractOpenAiAccountId(tokens) };
+}
+
+export async function runOpenAiBrowserOAuthFlow(): Promise<{ tokens: OAuthTokenResponse; accountId?: string }> {
+  const auth = await buildOpenAiBrowserAuthUrl();
+  open(auth.authUrl).catch(() => {});
+  try {
+    const callback = await auth.callbackServer.waitForCallback();
+    if (callback.error) throw new Error(`OpenAI authorization failed: ${callback.error}`);
+    if (!callback.state || callback.state !== auth.oauthState) throw new Error('OpenAI returned an unexpected OAuth state');
+    if (!callback.code) throw new Error('OpenAI did not return an authorization code');
+    return await exchangeOpenAiBrowserCode(callback.code, auth.codeVerifier, auth.redirectUri);
+  } finally {
+    auth.callbackServer.close();
+  }
 }
 
 export function extractOpenAiAccountId(tokens: OAuthTokenResponse): string | undefined {
