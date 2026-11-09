@@ -27,6 +27,15 @@ accept it explicitly once before building. For WiX 7, use:
 wix eula accept wix7
 ```
 
+For a one-off build without saving the acceptance, set the explicit opt-in
+variable for that command:
+
+```powershell
+$env:RELAY_AI_ACCEPT_WIX_EULA = '1'
+npm run build:msi
+Remove-Item Env:RELAY_AI_ACCEPT_WIX_EULA
+```
+
 ## Build the portable `.exe`
 
 ```powershell

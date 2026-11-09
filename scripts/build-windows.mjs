@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -75,13 +76,16 @@ run(process.execPath, [pkg,
 run(executablePath, ['--version']);
 
 if (wantsMsi) {
+  let wixVersion;
   try {
-    run('wix', ['--version']);
+    wixVersion = execFileSync('wix', ['--version'], { encoding: 'utf8' }).trim();
+    console.log(`> wix --version\n${wixVersion}`);
   } catch {
-    throw new Error('WiX v4 is required. Install it with `dotnet tool install --global wix` and retry.');
+    throw new Error('WiX Toolset v4 or later is required. Install it with `dotnet tool install --global wix` and retry.');
   }
 
-  run('wix', [
+  const wixMajor = Number.parseInt(wixVersion.match(/\d+/)?.[0] ?? '0', 10);
+  const wixArgs = [
     'build',
     join(repoRoot, 'installer', 'RelayAI.wxs'),
     '-d',
@@ -90,7 +94,24 @@ if (wantsMsi) {
     `ArtifactDir=${artifactDir}`,
     '-o',
     installerPath,
-  ]);
+  ];
+
+  // WiX 7 introduced an OSMF EULA gate. Never accept it silently: either the
+  // developer has accepted it persistently with `wix eula accept wix7`, or an
+  // explicit environment variable opts into the current-build acceptance.
+  if (wixMajor >= 7) {
+    const eulaFile = join(homedir(), '.wix', `wix${wixMajor}-osmf-eula.txt`);
+    if (!existsSync(eulaFile)) {
+      if (process.env.RELAY_AI_ACCEPT_WIX_EULA !== '1') {
+        throw new Error(
+          `WiX ${wixMajor} requires EULA acceptance. Run \`wix eula accept wix${wixMajor}\` once, or set RELAY_AI_ACCEPT_WIX_EULA=1 for this build, then retry.`,
+        );
+      }
+      wixArgs.splice(1, 0, '--acceptEula', `wix${wixMajor}`);
+    }
+  }
+
+  run('wix', wixArgs);
 }
 
 cleanup();
