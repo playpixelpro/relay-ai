@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="Relay AI"
+    Manufacturer="PlayPixelPro"
+    Version="$(var.RelayAiVersion)"
+    UpgradeCode="8B8C8E0A-3B52-4E11-9B59-CF996E0C3C9D"
+    Scope="perUser">
+    <SummaryInformation Description="Relay AI Windows CLI" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Relay AI is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="MainFeature" Title="Relay AI" Level="1">
+      <ComponentGroupRef Id="RelayAiFiles" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="PlayPixelPro\Relay AI" />
+    </StandardDirectory>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="RelayAiFiles" Directory="INSTALLFOLDER">
+      <Component Id="RelayAiExecutable">
+        <File Id="RelayAiExe" Source="$(var.ArtifactDir)\relay-ai.exe" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

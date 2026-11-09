@@ -33,6 +33,11 @@
     "dist",
     "README.md"
   ],
+  "pkg": {
+    "assets": [
+      "artifacts/windows/staging/ui/public/**/*"
+    ]
+  },
   "engines": {
     "node": ">=22"
   },
@@ -46,6 +51,8 @@
     "test:live": "vitest run tests/debug-xai.test.ts tests/debug-openai-oauth.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
+    "build:windows": "node scripts/build-windows.mjs",
+    "build:msi": "node scripts/build-windows.mjs --msi",
     "release:check": "node scripts/release-metadata.mjs",
     "refresh:models-dev": "node scripts/refresh-models-dev-cache.mjs",
     "prepublishOnly": "npm run release:check && npm run build"
@@ -88,6 +95,8 @@
     "@types/node-forge": "^1.3.14",
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^4.1.10",
+    "@yao-pkg/pkg": "^6.25.0",
+    "esbuild": "^0.28.2",
     "tsup": "^8.0.0",
     "typescript": "^5.5.0",
     "vite-node": "^6.0.0",
