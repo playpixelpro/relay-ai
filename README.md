@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/playpixelpro/relay-ai/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/release-v1.0.0-7c3aed" alt="Release v1.0.0"></a>
+  <a href="https://github.com/playpixelpro/relay-ai/releases/tag/v0.0.1-beta"><img src="https://img.shields.io/badge/release-v0.0.1--beta-7c3aed" alt="Release v0.0.1-beta"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e" alt="MIT License"></a>
 </p>
 
@@ -52,13 +52,23 @@ npm run build
 npm link
 ```
 
+### Windows beta installer
+
+For Windows, open the [v0.0.1-beta release](https://github.com/playpixelpro/relay-ai/releases/tag/v0.0.1-beta) and choose one:
+
+- **MSI installer:** installs the fork per-user under `%LOCALAPPDATA%\PlayPixelPro\Relay AI`.
+- **Portable executable:** download `relay-ai.exe` and run it directly; Node.js is not required.
+
+The MSI and portable executable are both Windows x64 beta builds. The source
+installation above remains available for macOS, Linux, and development use.
+
 Confirm the local installation:
 
 ```bash
 relay-ai --version
 ```
 
-It should report `1.0.0`.
+It should report `0.0.1-beta` for this beta release.
 
 ## Sign in with OpenAI/ChatGPT
 
@@ -101,6 +111,8 @@ The callback endpoint is `/auth/callback`; the server also accepts the legacy `/
 This fork is released under the [MIT License](LICENSE).
 
 For the complete provider, gateway, launcher, Docker, Core API, and troubleshooting documentation, open the [old README](oldreadme.md).
+
+If you like this fork or if this fork helps you, you can support its continued development with the button below.
 
 <p align="center">
   <a href="https://buymeacoffee.com/playpixelpro"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Support this fork" height="42"></a>

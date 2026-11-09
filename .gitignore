@@ -12,6 +12,8 @@ coverage/
 *.tsbuildinfo
 spike/
 vertex-models.json
+artifacts/
+.windows-test/
 
 # IDE / Editor folders
 .vscode/
