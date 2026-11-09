@@ -1,11 +1,5 @@
 #!/usr/bin/env node
 import {
-  hasApplicationDefaultCredentials,
-  loadVertexModelEntries,
-  resolveVertexProject,
-  saveVertexModelEntries
-} from "./chunk-3YGQMZQZ.js";
-import {
   CLAUDE_CODE_BILLING_HEADER_PREFIX,
   CLAUDE_CODE_USER_AGENT,
   CODEX_RESPONSES_LITE_VERSION,
@@ -23,7 +17,13 @@ import {
   isProviderKind,
   providerKind,
   selectBetaFlags
-} from "./chunk-TASA6DTW.js";
+} from "./chunk-P5D4UPBQ.js";
+import {
+  hasApplicationDefaultCredentials,
+  loadVertexModelEntries,
+  resolveVertexProject,
+  saveVertexModelEntries
+} from "./chunk-3YGQMZQZ.js";
 import {
   getAppHome,
   getConfigPath,
@@ -5286,4 +5286,4 @@ export {
   deepMergeProviderOptions,
   thinkingProviderOptions
 };
-//# sourceMappingURL=chunk-4YNBCXOB.js.map
+//# sourceMappingURL=chunk-3HFK2ZBG.js.map

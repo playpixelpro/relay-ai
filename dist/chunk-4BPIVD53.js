@@ -3,17 +3,7 @@ import {
   extractApiKey,
   readBody,
   sendJson
-} from "./chunk-55WYFZEQ.js";
-import {
-  SubagentRouteRegistry,
-  anthropicEffortFromRequest,
-  claudeModelFamily,
-  extractClaudeSessionId,
-  generateAnthropicResponse,
-  streamAnthropicResponse,
-  translateRequest,
-  writeAnthropicStream
-} from "./chunk-GSFZXZPG.js";
+} from "./chunk-6KKYNSUA.js";
 import {
   COMMANDCODE_BASE_URL,
   addOpencodeCloudFromApiKey,
@@ -24,14 +14,23 @@ import {
   filterModelsByAvailability,
   refreshProviderModels,
   validateClinePassApiKey
-} from "./chunk-GJCRQMOZ.js";
+} from "./chunk-FGH2JCMR.js";
 import {
   MAX_POOL_ATTEMPTS,
   POOL_MAX_TOOLS,
   dispatchFreePool,
   formatCodexModelLabel,
-  requestFingerprint
-} from "./chunk-DZWBPL4X.js";
+  lazyPoolRoute,
+  loadCoreRegistry,
+  poolCatalogEntry,
+  poolMemberEffort,
+  poolOutputCap,
+  poolRequestFitsWindow,
+  poolRouteKey,
+  requestFingerprint,
+  sdkPoolRoute,
+  translatedEffortClaim
+} from "./chunk-S3VNFDHR.js";
 import {
   PoolHealthStore,
   describePoolFailure,
@@ -52,7 +51,17 @@ import {
   resolveLocalProviderApiKey,
   retryPoolFailure,
   toOAuthRegistryId
-} from "./chunk-UF5HSQ52.js";
+} from "./chunk-7W4UIIEX.js";
+import {
+  SubagentRouteRegistry,
+  anthropicEffortFromRequest,
+  claudeModelFamily,
+  extractClaudeSessionId,
+  generateAnthropicResponse,
+  streamAnthropicResponse,
+  translateRequest,
+  writeAnthropicStream
+} from "./chunk-XOULEZ4D.js";
 import {
   anthropicErrorType,
   formatUpstreamError,
@@ -113,14 +122,7 @@ import {
   vertexAnthropicCachedModels,
   vertexAnthropicSetupError,
   writeSecureLogLine
-} from "./chunk-4YNBCXOB.js";
-import {
-  hasApplicationDefaultCredentials,
-  loadVertexModelEntries,
-  resolveVertexLocation,
-  resolveVertexProject,
-  saveVertexModelEntries
-} from "./chunk-3YGQMZQZ.js";
+} from "./chunk-3HFK2ZBG.js";
 import {
   ANTIGRAVITY_BASE_URLS,
   ANTIGRAVITY_USER_AGENT,
@@ -163,7 +165,7 @@ import {
   supportsAdditionalOAuthAccounts,
   supportsNativeOAuth,
   tokensToStoredCredential
-} from "./chunk-TASA6DTW.js";
+} from "./chunk-P5D4UPBQ.js";
 import {
   getTemplateById,
   init_provider_templates,
@@ -175,7 +177,7 @@ import {
   resolveVertexLocation,
   resolveVertexProject,
   saveVertexModelEntries
-} from "./chunk-W32XKRNU.js";
+} from "./chunk-3YGQMZQZ.js";
 import {
   getAppHome
 } from "./chunk-TWCLCOFD.js";
@@ -4379,8 +4381,8 @@ async function serveOpenAiPool(req, res, options, body, plog) {
   plog(() => `openai-chat-completions pool stream=${body.stream === true}`);
   try {
     const [{ createRelayModel }, { RELAY_POOL_ROUTE_ID }] = await Promise.all([
-      import("./model-QBY2PRTS.js"),
-      import("./pool-model-LOTLKWMR.js")
+      import("./model-LOKUASFS.js"),
+      import("./pool-model-VLICF75P.js")
     ]);
     const languageModel = await createRelayModel(RELAY_POOL_ROUTE_ID, { sessionId, onDebug: plog });
     const params = translateOpenAiRequest(body);
@@ -7398,4 +7400,4 @@ export {
   supportsClaudeTransparentMode,
   buildHttpProxyRoutes
 };
-//# sourceMappingURL=chunk-HVOOSI6X.js.map
+//# sourceMappingURL=chunk-4BPIVD53.js.map

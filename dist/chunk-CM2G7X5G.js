@@ -4,10 +4,10 @@ import {
   formatUiAvailableLine,
   readUiLock,
   removeLock
-} from "./chunk-K3VLZXMD.js";
+} from "./chunk-CKQJIZLD.js";
 import {
   getAppHome
-} from "./chunk-XEH2JMTL.js";
+} from "./chunk-TWCLCOFD.js";
 
 // src/ui-background.ts
 import { spawn } from "child_process";
@@ -131,4 +131,4 @@ export {
   announceBackgroundUi,
   printUiUrlLast
 };
-//# sourceMappingURL=chunk-4BVKM3FX.js.map
+//# sourceMappingURL=chunk-CM2G7X5G.js.map

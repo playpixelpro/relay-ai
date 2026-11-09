@@ -5,9 +5,9 @@ import {
   printUiUrlLast,
   releaseBackgroundUi,
   shouldEnsureBackgroundUi
-} from "./chunk-4BVKM3FX.js";
-import "./chunk-K3VLZXMD.js";
-import "./chunk-XEH2JMTL.js";
+} from "./chunk-CM2G7X5G.js";
+import "./chunk-CKQJIZLD.js";
+import "./chunk-TWCLCOFD.js";
 import "./chunk-JIDIH7DS.js";
 export {
   announceBackgroundUi,
@@ -16,4 +16,4 @@ export {
   releaseBackgroundUi,
   shouldEnsureBackgroundUi
 };
-//# sourceMappingURL=ui-background-QC2VFK67.js.map
+//# sourceMappingURL=ui-background-NZT52SXV.js.map

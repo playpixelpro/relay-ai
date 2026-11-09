@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {
   getAppHome
-} from "./chunk-XEH2JMTL.js";
+} from "./chunk-TWCLCOFD.js";
 
 // src/ui-lock.ts
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
@@ -84,4 +84,4 @@ export {
   checkExistingServer,
   formatUiAvailableLine
 };
-//# sourceMappingURL=chunk-K3VLZXMD.js.map
+//# sourceMappingURL=chunk-CKQJIZLD.js.map

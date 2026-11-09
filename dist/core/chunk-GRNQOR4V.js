@@ -8345,7 +8345,7 @@ function wrapPoolError(error) {
 }
 var sessions = new PoolSessionRoutes();
 async function memberModel(routeId, context) {
-  const { createRelayModel: createRelayModel2 } = await import("./model-3HZ62ZGO.js");
+  const { createRelayModel: createRelayModel2 } = await import("./model-YBNEL7QV.js");
   return createRelayModel2(routeId, {
     sessionId: context.sessionId,
     ...context.options?.onDebug ? { onDebug: context.options.onDebug } : {},
@@ -8946,4 +8946,4 @@ export {
   loadCoreRegistry,
   listRelayModels
 };
-//# sourceMappingURL=chunk-7BSIIIDQ.js.map
+//# sourceMappingURL=chunk-GRNQOR4V.js.map

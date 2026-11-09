@@ -3,7 +3,17 @@ import {
   handlePoolApi,
   invalidateUiPoolMember,
   verifyUiPoolMember
-} from "./chunk-7HZ7T4UP.js";
+} from "./chunk-XEDEODWS.js";
+import {
+  AA_SITE_URL,
+  IntelligenceError,
+  buildIntelligenceLookup,
+  hasIntelligenceKey,
+  isIntelligenceStale,
+  loadIntelligenceCache,
+  refreshIntelligence,
+  removeIntelligence
+} from "./chunk-3X5C7CR4.js";
 import {
   addProviderFromTemplate,
   buildDedupedModelRows,
@@ -36,12 +46,21 @@ import {
   subscriptionOAuthRiskLines,
   summarizeServerProviders,
   supportsClaudeTransparentMode
-} from "./chunk-HVOOSI6X.js";
+} from "./chunk-4BPIVD53.js";
 import {
   readBody,
   sendJson
-} from "./chunk-55WYFZEQ.js";
-import "./chunk-GSFZXZPG.js";
+} from "./chunk-6KKYNSUA.js";
+import {
+  DEFAULT_SERVER_UI_PORT,
+  checkExistingServer,
+  formatUiAvailableLine,
+  probeServerHealth,
+  readUiLock,
+  removeLock,
+  removeOwnUiLock,
+  writeUiLock
+} from "./chunk-CKQJIZLD.js";
 import {
   TRUST_SYSTEM_CERTS_NOTICE,
   addCustomEndpointProvider,
@@ -62,22 +81,23 @@ import {
   setModelMarkedFree,
   setModelsHidden,
   updateCustomEndpointProvider
-} from "./chunk-GJCRQMOZ.js";
-import {
-  validateCustomEndpointUrl
-} from "./chunk-2FGSEXYO.js";
+} from "./chunk-FGH2JCMR.js";
 import {
   poolCatalogEntry
-} from "./chunk-DZWBPL4X.js";
+} from "./chunk-S3VNFDHR.js";
 import {
   clearPoolActivity,
   fetchProviderCatalog,
   providersForCodexSubagents,
   providersForTarget
-} from "./chunk-UF5HSQ52.js";
+} from "./chunk-7W4UIIEX.js";
 import {
   copilotPlanTier
-} from "./chunk-CTHLP6OC.js";
+} from "./chunk-BGFI6S24.js";
+import "./chunk-XOULEZ4D.js";
+import {
+  validateCustomEndpointUrl
+} from "./chunk-2FGSEXYO.js";
 import "./chunk-CEZPXOMT.js";
 import "./chunk-GCAHVQ72.js";
 import {
@@ -120,18 +140,7 @@ import {
   setTrustSystemCertificates,
   supportsManualModels,
   writeSecureLogLine
-} from "./chunk-4YNBCXOB.js";
-import "./chunk-3YGQMZQZ.js";
-import {
-  AA_SITE_URL,
-  IntelligenceError,
-  buildIntelligenceLookup,
-  hasIntelligenceKey,
-  isIntelligenceStale,
-  loadIntelligenceCache,
-  refreshIntelligence,
-  removeIntelligence
-} from "./chunk-CNJ3FPFP.js";
+} from "./chunk-3HFK2ZBG.js";
 import {
   BACKENDS,
   CODEX_SUBAGENT_MODEL_CAP,
@@ -159,7 +168,7 @@ import {
   resolveProviderCredential,
   saveProviderCredential,
   supportsAdditionalOAuthAccounts
-} from "./chunk-TASA6DTW.js";
+} from "./chunk-P5D4UPBQ.js";
 import {
   getTemplateById,
   init_provider_templates,
@@ -169,9 +178,8 @@ import {
   provider_templates_exports,
   supportsAdditionalApiAccounts
 } from "./chunk-JPZ3S2TA.js";
-import {
-  getAppHome
-} from "./chunk-TWCLCOFD.js";
+import "./chunk-3YGQMZQZ.js";
+import "./chunk-TWCLCOFD.js";
 import {
   __toCommonJS
 } from "./chunk-JIDIH7DS.js";
@@ -1185,7 +1193,7 @@ async function handleMeasureContextWindow(req, res) {
     if (!res.writableEnded) controller.abort();
   });
   try {
-    const { checkContextWindow } = await import("./test-model-VP4EAJMT.js");
+    const { checkContextWindow } = await import("./test-model-ABSGDFDC.js");
     const context = await checkContextWindow(provider.id, body.modelId, controller.signal);
     if (!res.destroyed) sendJson(res, 200, { ok: true, context });
   } catch {
@@ -1212,7 +1220,7 @@ async function handleManualModel(req, res, action) {
     return;
   }
   try {
-    const { addManualModel, removeManualModel } = await import("./manual-models-AAS2HYAL.js");
+    const { addManualModel, removeManualModel } = await import("./manual-models-7MLHADJ2.js");
     const result = action === "add" ? await addManualModel({
       providerId: providerId.trim(),
       modelId: modelId.trim(),
@@ -1543,7 +1551,7 @@ async function handleTestModel(req, res) {
   };
   res.on("close", cancel);
   try {
-    const { testModel } = await import("./test-model-VP4EAJMT.js");
+    const { testModel } = await import("./test-model-ABSGDFDC.js");
     const result = await testModel(body.providerId.trim(), body.modelId.trim(), controller.signal);
     if (!controller.signal.aborted) {
       try {
@@ -1560,7 +1568,7 @@ async function handleTestModel(req, res) {
         if (provider && cachedModel) {
           const probeAllowed = customEndpointKind(provider) || isFreeStatus(classifyFreeStatus({ model: cachedModel, providerId: provider.id, templateId: provider.templateId }));
           if (probeAllowed || providerKind(provider.id) === "ollama") {
-            const { checkContextWindow } = await import("./test-model-VP4EAJMT.js");
+            const { checkContextWindow } = await import("./test-model-ABSGDFDC.js");
             context = await checkContextWindow(provider.id, cachedModel.id, controller.signal, { lookupOnly: !probeAllowed });
           }
         }
@@ -1634,13 +1642,13 @@ async function handleIntelligenceKey(req, res) {
       sendJson(res, 400, { ok: false, error: "Paste your Artificial Analysis API key." });
       return;
     }
-    const { fetchIntelligenceScores, saveIntelligenceKey: save } = await import("./artificial-analysis-RQHGPA6D.js");
+    const { fetchIntelligenceScores, saveIntelligenceKey: save } = await import("./artificial-analysis-Q7EXVO6E.js");
     const cache = await fetchIntelligenceScores(key);
     if (!await save(key)) {
       sendJson(res, 200, { ok: false, error: "Could not store the key in the system credential store." });
       return;
     }
-    const { writeIntelligenceCache } = await import("./artificial-analysis-RQHGPA6D.js");
+    const { writeIntelligenceCache } = await import("./artificial-analysis-Q7EXVO6E.js");
     writeIntelligenceCache(cache);
     sendJson(res, 200, { ok: true, ...await intelligenceStatusBody() });
   } catch (err) {
@@ -1707,7 +1715,7 @@ async function handleEditServerUrl(req, res) {
       sendJson(res, 400, { ok: false, error: valid.error ?? "Invalid URL", hint: valid.hint });
       return;
     }
-    const { setProviderServerUrl } = await import("./crud-CZERRPL5.js");
+    const { setProviderServerUrl } = await import("./crud-XXL5O2KW.js");
     const previous = provider.api.url ?? "";
     if (previous.replace(/\/+$/, "") === newUrl) {
       sendJson(res, 200, { ok: true, unchanged: true });
@@ -2616,4 +2624,4 @@ export {
   runUiCommand,
   stopUiServer
 };
-//# sourceMappingURL=ui-command-JRTNTKJY.js.map
+//# sourceMappingURL=ui-command-7IVPWJGP.js.map

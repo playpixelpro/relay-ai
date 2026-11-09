@@ -16,12 +16,12 @@ import {
   recordPoolActivity,
   resolveLocalProviderApiKey,
   retryPoolFailure
-} from "./chunk-UF5HSQ52.js";
+} from "./chunk-7W4UIIEX.js";
 import {
   copilotPlanTier,
   filterCachedCopilotModels,
   stripGoogleModelPrefix
-} from "./chunk-CTHLP6OC.js";
+} from "./chunk-BGFI6S24.js";
 import {
   normalizeToolSchemaForNpm
 } from "./chunk-CEZPXOMT.js";
@@ -58,10 +58,11 @@ import {
   sseChunk,
   streamActivity,
   thinkingProviderOptions
-} from "./chunk-4YNBCXOB.js";
+} from "./chunk-3HFK2ZBG.js";
 import {
-  isProviderKind
-} from "./chunk-TASA6DTW.js";
+  isProviderKind,
+  resolveProviderOAuthProviderData
+} from "./chunk-P5D4UPBQ.js";
 
 // src/core/pool-model.ts
 import { randomUUID as randomUUID2 } from "crypto";
@@ -2830,7 +2831,7 @@ function wrapPoolError(error) {
 }
 var sessions = new PoolSessionRoutes();
 async function memberModel(routeId, context) {
-  const { createRelayModel } = await import("./model-QBY2PRTS.js");
+  const { createRelayModel } = await import("./model-LOKUASFS.js");
   return createRelayModel(routeId, {
     sessionId: context.sessionId,
     ...context.options?.onDebug ? { onDebug: context.options.onDebug } : {},
@@ -3183,4 +3184,4 @@ export {
   parseRelayRouteId,
   loadCoreRegistry
 };
-//# sourceMappingURL=chunk-DZWBPL4X.js.map
+//# sourceMappingURL=chunk-S3VNFDHR.js.map

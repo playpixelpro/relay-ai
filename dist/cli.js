@@ -74,20 +74,17 @@ import {
   supportsClaudeTransparentMode,
   upstreamModelId,
   waitForCodexAppQuit
-} from "./chunk-HVOOSI6X.js";
+} from "./chunk-4BPIVD53.js";
 import {
   extractApiKey,
   readBody,
   sendJson,
   warnDisabledPoolMembers
-} from "./chunk-55WYFZEQ.js";
+} from "./chunk-6KKYNSUA.js";
 import {
-  addManualModel,
-  removeManualModel
-} from "./chunk-2RZCORTH.js";
-import {
-  translateRequest
-} from "./chunk-GSFZXZPG.js";
+  printUiUrlLast
+} from "./chunk-CM2G7X5G.js";
+import "./chunk-CKQJIZLD.js";
 import {
   TRUST_SYSTEM_CERTS_NOTICE,
   UNTRUSTED_CERTIFICATE_CODE,
@@ -111,10 +108,7 @@ import {
   toggleProviderEnabled,
   updateCustomEndpointProvider,
   zenRegistryStub
-} from "./chunk-GJCRQMOZ.js";
-import {
-  validateCustomEndpointUrl
-} from "./chunk-2FGSEXYO.js";
+} from "./chunk-FGH2JCMR.js";
 import {
   CODEX_APP_AUTO_COMPACT_RATIO,
   CODEX_APP_PROVIDER_ID,
@@ -152,7 +146,7 @@ import {
   supportsMultiAgentV2,
   translateResponsesRequest,
   writeResponsesErrorStream
-} from "./chunk-DZWBPL4X.js";
+} from "./chunk-S3VNFDHR.js";
 import {
   OPENCODE_SESSION_HEADER,
   PoolHealthStore,
@@ -190,14 +184,22 @@ import {
   retryPoolFailure,
   routableModelsForTarget,
   toOAuthRegistryId
-} from "./chunk-UF5HSQ52.js";
+} from "./chunk-7W4UIIEX.js";
 import {
   effectiveProviderBaseUrl,
   isLikelyPlaceholderKey,
   resolveProviderTemplate,
   resolveRefreshCredential,
   syntheticTemplate
-} from "./chunk-CTHLP6OC.js";
+} from "./chunk-BGFI6S24.js";
+import {
+  addManualModel,
+  removeManualModel
+} from "./chunk-AKGXM6NQ.js";
+import "./chunk-XOULEZ4D.js";
+import {
+  validateCustomEndpointUrl
+} from "./chunk-2FGSEXYO.js";
 import {
   normalizeToolSchemaForNpm
 } from "./chunk-CEZPXOMT.js";
@@ -268,16 +270,7 @@ import {
   vertexAnthropicCachedModels,
   vertexModelDisplayName,
   writeSecureLogLine
-} from "./chunk-4YNBCXOB.js";
-import {
-  DEFAULT_VERTEX_MODELS,
-  hasApplicationDefaultCredentials,
-  hasCustomVertexModels,
-  loadVertexModelEntries,
-  resetVertexModelEntries,
-  resolveVertexProject,
-  saveVertexModelEntries
-} from "./chunk-3YGQMZQZ.js";
+} from "./chunk-3HFK2ZBG.js";
 import {
   ANTIGRAVITY_BASE_URLS,
   ANTIGRAVITY_USER_AGENT,
@@ -315,7 +308,7 @@ import {
   saveToCredentialStore,
   supportsAdditionalOAuthAccounts,
   supportsNativeOAuth
-} from "./chunk-TASA6DTW.js";
+} from "./chunk-P5D4UPBQ.js";
 import {
   filterTemplates,
   getTemplateById,
@@ -334,7 +327,7 @@ import {
   resetVertexModelEntries,
   resolveVertexProject,
   saveVertexModelEntries
-} from "./chunk-W32XKRNU.js";
+} from "./chunk-3YGQMZQZ.js";
 import {
   getAppHome,
   getConfigPath,
@@ -3466,7 +3459,7 @@ async function runModelContextMenu(providerId, model) {
     if (choice === "test") {
       const spinner11 = p8.spinner();
       spinner11.start(`Testing ${current.id}...`);
-      const { testModel } = await import("./test-model-VP4EAJMT.js");
+      const { testModel } = await import("./test-model-ABSGDFDC.js");
       const result = await testModel(providerId, current.id);
       spinner11.stop("");
       if (!result.ok) {
@@ -18099,11 +18092,25 @@ Options:
   --trace    Write debug logs under ~/.relay-ai/logs/`);
       return 0;
     }
-    const { runUiCommand } = await import("./ui-command-JRTNTKJY.js");
-    return runUiCommand({ trace: parsed.trace, serverMode: parsed.uiServerMode });
+    if (parsed.uiAction === "stop") {
+      const { stopUiServer } = await import("./ui-command-7IVPWJGP.js");
+      const result = await stopUiServer();
+      if (result.stopped) {
+        console.log(`
+  ${pc11.green("\u2713")} ${result.message}
+`);
+        return 0;
+      }
+      console.log(`
+  ${pc11.dim(result.message)}
+`);
+      return 0;
+    }
+    const { runUiCommand } = await import("./ui-command-7IVPWJGP.js");
+    return runUiCommand({ trace: parsed.trace, serverMode: parsed.uiServerMode, background: parsed.uiBackground });
   }
   if (parsed.command === "pool") {
-    const { poolHelpText, runPoolCommand } = await import("./command-QYNSQT7R.js");
+    const { poolHelpText, runPoolCommand } = await import("./command-PJD2TBMB.js");
     if (parsed.showHelp) {
       printHelp(poolHelpText);
       return 0;
@@ -18145,7 +18152,7 @@ Options:
     return runProvidersCommand(parsed.claudeArgs);
   }
   if (isToolLaunch(parsed)) {
-    const { announceBackgroundUi, shouldEnsureBackgroundUi } = await import("./ui-background-QC2VFK67.js");
+    const { announceBackgroundUi, shouldEnsureBackgroundUi } = await import("./ui-background-NZT52SXV.js");
     if (shouldEnsureBackgroundUi({ dryRun: parsed.dryRun })) await announceBackgroundUi();
   }
   if (parsed.command === "codex-app") {
