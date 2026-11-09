@@ -3,7 +3,7 @@
   <Package
     Name="Relay AI"
     Manufacturer="PlayPixelPro"
-    Version="$(var.RelayAiVersion)"
+    Version="$(var.RelayAiMsiVersion)"
     UpgradeCode="8B8C8E0A-3B52-4E11-9B59-CF996E0C3C9D"
     Scope="perUser">
     <SummaryInformation Description="Relay AI Windows CLI" />

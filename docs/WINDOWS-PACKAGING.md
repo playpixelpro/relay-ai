@@ -56,6 +56,10 @@ This first creates and validates the executable, then builds
 `%LOCALAPPDATA%\PlayPixelPro\Relay AI` and does not require administrator
 privileges.
 
+MSI ProductVersion values are numeric because Windows Installer does not allow
+npm prerelease labels. For example, the `0.0.1-beta` release uses MSI ProductVersion
+`0.0.1`; the beta label remains in the filename, package version, and release tag.
+
 The generated `artifacts/` directory is intentionally ignored by Git. Release
 workflows can upload the two files as release assets without committing binary
 artifacts to the repository.

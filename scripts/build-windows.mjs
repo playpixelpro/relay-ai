@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
+const msiVersion = packageJson.version.split('-')[0];
 const artifactDir = join(repoRoot, 'artifacts', 'windows');
 const stagingDir = join(artifactDir, 'staging');
 const stagedEntry = join(stagingDir, 'cli.cjs');
@@ -89,7 +90,7 @@ if (wantsMsi) {
     'build',
     join(repoRoot, 'installer', 'RelayAI.wxs'),
     '-d',
-    `RelayAiVersion=${packageJson.version}`,
+    `RelayAiMsiVersion=${msiVersion}`,
     '-d',
     `ArtifactDir=${artifactDir}`,
     '-o',

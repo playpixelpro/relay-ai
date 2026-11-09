@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.1-beta] - 2026-11-09
+
+### Added
+
+- **Windows beta distribution.** This fork now ships a portable `relay-ai.exe` and a per-user `relay-ai-0.0.1-beta.msi` installer that do not require Node.js on the target machine.
+- **Windows installation instructions.** The README now links directly to the beta release assets and explains the MSI and portable installation paths.
+
 ## [1.0.0] - 2026-11-09
 
 ### Added
