@@ -23,6 +23,12 @@
 
 **relay-ai** is an interactive CLI — and now a **visual launcher** — that connects AI coding tools to any provider and runs local API gateways on your machine. It supports **Claude Code**, **Claude Desktop (Cowork + Code)**, the **OpenAI Codex CLI**, the **ChatGPT desktop app in Codex mode (macOS + Windows + Linux)**, **Google Gemini CLI**, and **Antigravity CLI / app / IDE**.
 
+### Updates in this fork
+
+- **OpenAI/ChatGPT OAuth now uses browser PKCE sign-in** in both the CLI and visual launcher, with a localhost callback on port 1455 and a safe fallback to 1457 when needed. Other OAuth providers retain their device-code flows.
+- **OpenAI callback handling accepts the registered `/auth/callback` route**, improving compatibility with the current ChatGPT authorization flow.
+- **OAuth account management and UI tests cover the browser callback flow**, including multiple ChatGPT accounts and refresh-after-sign-in behavior.
+
 > **Deploy with Docker / AI assistants:** To run an always-on **Server + Admin UI** from this repo (`docker compose up`), read **[docs/DOCKER.md](docs/DOCKER.md)** first — it includes questions to ask the user and an exact checklist. The container is **not** full desktop Relay AI (no Claude/Codex/Antigravity app launch inside Docker).
 
 Pick your backend:
@@ -169,7 +175,7 @@ To fully remove the tool and all its configuration data, you can delete the conf
 | Antigravity IDE | `relay-ai antigravity-ide` | ✅ Supported macOS + Windows — use a throwaway Google account ([guide](docs/ANTIGRAVITY.md)) |
 | GitHub Copilot OAuth | `relay-ai providers auth github-copilot` | ✅ Device code flow ([guide](docs/SUBSCRIPTION-OAUTH.md)) |
 | xAI SuperGrok OAuth | `relay-ai providers auth xai-oauth` | ✅ Device code flow ([guide](docs/SUBSCRIPTION-OAUTH.md)) |
-| OpenAI ChatGPT OAuth | `relay-ai providers auth openai-oauth` | ✅ Device code flow ([guide](docs/SUBSCRIPTION-OAUTH.md)) |
+| OpenAI ChatGPT OAuth | `relay-ai providers auth openai-oauth` | ✅ Browser PKCE flow with localhost callback ([guide](docs/SUBSCRIPTION-OAUTH.md)) |
 | ClinePass OAuth | `relay-ai providers auth cline-pass` | ✅ Device code flow ([guide](docs/SUBSCRIPTION-OAUTH.md)) |
 
 ## Setup
@@ -215,7 +221,7 @@ Opens a browser-based dashboard on a random local port. From the UI you can:
 - **Keep your normal models** — on the Claude Code CLI, Codex CLI and ChatGPT Desktop cards, check **Native + Relay models** to keep your normal Claude or Codex models alongside the selected Relay model and compatible favorites. This option is not shown for Claude Desktop.
 - **Manage General Favorites** — the sidebar shows your saved favorite models with a slot indicator (Slots used X/50). Favorites launch through all supported agents, including Antigravity.
 - **Manage models** — open a provider to Test models, see each model's type and context size (with where each came from: manual, tested/measured, models.dev, estimate or name guess), set sizes or types by hand, and hide models from every picker. Custom endpoints also get **Measure context sizes**. See [Custom endpoints](docs/PROVIDERS.md#custom-endpoints).
-- **Manage providers** — add providers from templates, delete providers, and refresh model lists inline, all without leaving the browser. For GitHub Copilot, ChatGPT, xAI, and ClinePass OAuth, the UI displays a one-time device code with **Copy code** and **Open sign-in page** buttons so you can complete sign-in without using the terminal. ClinePass can also be configured with an API key from the same provider card.
+- **Manage providers** — add providers from templates, delete providers, and refresh model lists inline, all without leaving the browser. GitHub Copilot, xAI, and ClinePass OAuth use a one-time device code with **Copy code** and **Open sign-in page** buttons; ChatGPT OAuth opens its browser PKCE flow and receives the result through Relay's localhost callback. ClinePass can also be configured with an API key from the same provider card.
 - **Compare models by intelligence** — add your own free Artificial Analysis key on the **Intelligence** page and every model list gets a sortable score column ([guide](docs/INTELLIGENCE.md)).
 - **Run the Server tab** — configure and start the same gateway as `relay-ai server` (favorites-only or specific providers, discovery id masking, local/network listen mode) and see the resulting URLs, API key, and model catalog right in the browser. Runs in the same process as the UI, so it stops when you close the dashboard. See [Registry gateway (`relay-ai server`)](#registry-gateway-relay-ai-server) below for what each option does.
 
@@ -493,8 +499,8 @@ Device code flows for existing subscriptions:
 
 ```bash
 relay-ai providers auth github-copilot   # GitHub Copilot
-relay-ai providers auth openai-oauth     # ChatGPT Plus / Pro
-relay-ai providers auth xai-oauth        # xAI SuperGrok
+relay-ai providers auth openai-oauth     # ChatGPT Plus / Pro (browser PKCE login)
+relay-ai providers auth xai-oauth        # xAI SuperGrok (device code)
 relay-ai providers auth cline-pass       # ClinePass account
 relay-ai providers auth claude-code      # Claude subscription (browser sign-in, paste the code back)
 relay-ai providers auth antigravity      # Antigravity (Google account — read the warning below)
