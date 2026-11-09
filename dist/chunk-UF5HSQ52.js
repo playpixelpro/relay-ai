@@ -13,6 +13,7 @@ import {
 } from "./chunk-GCAHVQ72.js";
 import {
   EFFORT_RANK,
+  NO_RECEIPT_EXPIRY,
   buildPricingIndex,
   classifyFreeStatus,
   createLanguageModel,
@@ -58,10 +59,6 @@ import {
   getAppHome,
   getLogsPath
 } from "./chunk-TWCLCOFD.js";
-
-// src/pool/activity.ts
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from "fs";
-import { join } from "path";
 
 // src/pool/errors.ts
 var GONE_PATTERN = new RegExp([
@@ -124,6 +121,8 @@ function retryPoolFailure(error) {
 }
 
 // src/pool/activity.ts
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from "fs";
+import { join } from "path";
 import pc from "picocolors";
 var MAX_BYTES = 256 * 1024;
 var KEEP_LINES = 500;
@@ -168,6 +167,13 @@ function recordPoolActivity(entry) {
       const lines = readFileSync(path, "utf8").split("\n").filter(Boolean);
       writeFileSync(path, lines.slice(-KEEP_LINES).join("\n") + "\n");
     }
+  } catch {
+  }
+}
+function clearPoolActivity() {
+  try {
+    const path = poolActivityPath();
+    if (existsSync(path)) writeFileSync(path, "");
   } catch {
   }
 }
@@ -359,6 +365,25 @@ function formatPoolCurrentLine(state) {
   const since = when && !Number.isNaN(when.getTime()) ? ` since ${when.toLocaleTimeString([], { hour12: false })}` : "";
   const smooth = state.quiet > 0 ? `, ${state.quiet} request${state.quiet === 1 ? "" : "s"} answered normally since` : "";
   return `Current model: ${pc.green(`${state.current.providerId}/${state.current.modelId}`)}${pc.dim(since + smooth)}`;
+}
+
+// src/pool/diagnostic.ts
+function redactDiagnostic(text, max = 160) {
+  const redacted = text.replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]").replace(/\b(?:sk|pk|rk)-[A-Za-z0-9_-]{6,}/gi, "[redacted]").replace(
+    /\b(?:sk|pk|rk|api[-_]?key|token|secret|authorization)[-_A-Za-z0-9]*\s*[:=]\s*["']?[A-Za-z0-9._~+/=-]{6,}/gi,
+    "[redacted]"
+  ).replace(/\b[A-Za-z0-9_-]{32,}\b/g, "[redacted]").replace(/\s+/g, " ").trim();
+  return redacted ? redacted.slice(0, max) : void 0;
+}
+function poolErrorDetail(error) {
+  try {
+    const formatted = formatUpstreamError(error);
+    const raw = error instanceof Error ? error.message : "";
+    const text = formatted && formatted !== "Upstream model request failed." ? formatted : raw;
+    return redactDiagnostic(text, 200);
+  } catch {
+    return void 0;
+  }
 }
 
 // src/pool/force-fail.ts
@@ -2342,7 +2367,6 @@ function providersForCodexSubagents(providers) {
 }
 
 // src/pool/enroll.ts
-var RECEIPT_TTL_MS = 24 * 60 * 60 * 1e3;
 var ENROLL_MAX_OUTPUT_TOKENS = 4096;
 async function verifyPoolMember(member, providers, signal, deps, now = Date.now()) {
   const provider = providers.find((item) => item.id === member.providerId);
@@ -2390,7 +2414,7 @@ async function verifyPoolMember(member, providers, signal, deps, now = Date.now(
       member: { providerId: member.providerId, modelId: member.modelId },
       endpointRevision: revision,
       verifiedAt: now,
-      expiresAt: now + RECEIPT_TTL_MS,
+      expiresAt: NO_RECEIPT_EXPIRY,
       targets,
       tools: true,
       maxOutputTokens: ENROLL_MAX_OUTPUT_TOKENS,
@@ -2485,25 +2509,6 @@ async function probePoolEffort(model, providerOptions, signal, timeoutMs = 2e4, 
   }
 }
 
-// src/pool/diagnostic.ts
-function redactDiagnostic(text, max = 160) {
-  const redacted = text.replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]").replace(/\b(?:sk|pk|rk)-[A-Za-z0-9_-]{6,}/gi, "[redacted]").replace(
-    /\b(?:sk|pk|rk|api[-_]?key|token|secret|authorization)[-_A-Za-z0-9]*\s*[:=]\s*["']?[A-Za-z0-9._~+/=-]{6,}/gi,
-    "[redacted]"
-  ).replace(/\b[A-Za-z0-9_-]{32,}\b/g, "[redacted]").replace(/\s+/g, " ").trim();
-  return redacted ? redacted.slice(0, max) : void 0;
-}
-function poolErrorDetail(error) {
-  try {
-    const formatted = formatUpstreamError(error);
-    const raw = error instanceof Error ? error.message : "";
-    const text = formatted && formatted !== "Upstream model request failed." ? formatted : raw;
-    return redactDiagnostic(text, 200);
-  } catch {
-    return void 0;
-  }
-}
-
 // src/pool/verify.ts
 import { randomUUID as randomUUID3 } from "crypto";
 function poolMembershipProblem(provider, model) {
@@ -2580,6 +2585,7 @@ export {
   poolRouteMember,
   describePoolFailure,
   recordPoolActivity,
+  clearPoolActivity,
   readPoolActivity,
   followPoolActivity,
   PoolRequestGrouper,

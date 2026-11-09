@@ -1,4 +1,5 @@
 import { parseFreePool } from '../pool/membership.js';
+import { clearPoolActivity } from '../pool/activity.js';
 import { poolCatalogEntry } from '../pool/catalog.js';
 import { handlePoolApi, verifyUiPoolMember, invalidateUiPoolMember } from './pool-api.js';
 import { supportsAdditionalOAuthAccounts } from '../oauth/types.js';
@@ -6,7 +7,7 @@ import { subscriptionOAuthRiskLines } from '../oauth/risk-notice.js';
 import { readOAuthAccountLabel } from '../registry/oauth-account.js';
 import { describeOAuthAccount, formatOAuthAccount } from '../oauth/identity.js';
 import { isProviderKind, providerKind } from '../registry/provider-kind.js';
-import { getSupportedApps, getSupportedApp, getRelayLaunchCommand, detectApp } from '../native-launcher.js';
+import { getSupportedApps, getSupportedApp, getRelayLaunchCommand, detectApp, POOL_LAUNCH_APPS } from '../native-launcher.js';
 import { exec } from 'node:child_process';
 import { localTimestamp } from '../trace-log.js';
 import { promisify } from 'node:util';
@@ -49,6 +50,7 @@ import {
   applySystemCaTrust, revertSystemCaTrust, isSystemCaSupported, isSystemCaActive, TRUST_SYSTEM_CERTS_NOTICE,
 } from '../tls-trust.js';
 import { saveNativeOAuthCredential } from '../registry/provider-auth.js';
+import { getRelayAccountUsage, readRelayAccountUsage } from '../core/usage.js';
 import { removeProviderFromRegistry, renameProvider, setContextWindowOverride, setModelHidden, setModelKindOverride, recordModelTestResult, setModelMarkedFree, setModelsHidden } from '../registry/crud.js';
 import { guessModelKindFromName, MODEL_KINDS, nameKindOutranksChatTest, type ModelKind } from '../registry/model-kind.js';
 import type { RegistryProvider } from '../registry/types.js';
@@ -89,6 +91,7 @@ export interface UiApiOptions {
   /** When `server`, app launch APIs are disabled (Docker admin UI). */
   uiMode?: 'full' | 'server';
   onServerLifecycle?: (event: UiServerLifecycleEvent) => void;
+  onShutdown?: () => void;
 }
 
 // ── OAuth device-code session store ──────────────────────────────────────────
@@ -169,7 +172,11 @@ export function handleUiApiRequest(req: IncomingMessage, res: ServerResponse, op
   const url = req.url ?? '';
   traceUi(opts, `${req.method ?? 'GET'} ${url}`);
 
-  if (url === '/api/pool' && (req.method === 'GET' || req.method === 'POST')) {
+  if (url === '/api/pool/activity/clear' && req.method === 'POST') {
+    handleClearPoolActivity(res);
+  } else if (url === '/api/ui/shutdown' && req.method === 'POST') {
+    handleUiShutdown(res, opts);
+  } else if (url === '/api/pool' && (req.method === 'GET' || req.method === 'POST')) {
     void handlePoolApi(req, res);
   } else if (url === '/api/config' && req.method === 'GET') {
     handleGetConfig(res);
@@ -196,6 +203,10 @@ export function handleUiApiRequest(req: IncomingMessage, res: ServerResponse, op
     handleAddCustomProvider(req, res);
   } else if (url === '/api/providers/edit-custom' && req.method === 'POST') {
     handleEditCustomProvider(req, res);
+  } else if (url === '/api/usage' && req.method === 'GET') {
+    void handleGetUsage(res);
+  } else if (url === '/api/usage/refresh' && req.method === 'POST') {
+    void handleUsageRefresh(req, res);
   } else if (url === '/api/intelligence/status' && req.method === 'GET') {
     handleIntelligenceStatus(res);
   } else if (url === '/api/intelligence/key' && req.method === 'POST') {
@@ -257,6 +268,24 @@ export function handleUiApiRequest(req: IncomingMessage, res: ServerResponse, op
   } else {
     sendJson(res, 404, { error: 'Not found' });
   }
+}
+
+function handleClearPoolActivity(res: ServerResponse): void {
+  clearPoolActivity();
+  sendJson(res, 200, { ok: true });
+}
+
+function handleUiShutdown(res: ServerResponse, opts: UiApiOptions): void {
+  sendJson(res, 200, { ok: true, message: 'Shutting down Relay UI' });
+  setTimeout(() => {
+    try {
+      if (opts.onShutdown) {
+        opts.onShutdown();
+      } else {
+        process.exit(0);
+      }
+    } catch {}
+  }, 100);
 }
 
 async function handleGetUpdateStatus(res: ServerResponse): Promise<void> {
@@ -500,9 +529,10 @@ async function handleGetModels(
     }
 
     // The virtual model is a launch choice, not a provider to configure.
-    if (target === 'claude' || target === 'codex') {
+    const poolTarget = target ? POOL_TARGET_FOR_LAUNCH[target] : undefined;
+    if (poolTarget) {
       const pool = parseFreePool(loadPreferences().freePool);
-      const entry = pool.enabled ? poolCatalogEntry(pool, pool.receipts, target) : undefined;
+      const entry = pool.enabled ? poolCatalogEntry(pool, pool.receipts, poolTarget) : undefined;
       if (entry) (providers as any[]).push({ id: 'relay-free-pool', name: 'Relay Free Pool',
         favoriteName: 'Relay Free Pool', hasKey: true, authType: 'none', modelCount: 1,
         models: [{ id: 'relay-free-pool', name: 'Relay Free Pool', contextWindow: entry.context_window,
@@ -1132,6 +1162,30 @@ async function handleIntelligenceRefresh(res: ServerResponse): Promise<void> {
   } finally { intelligenceRefreshing = false; }
 }
 
+/** Saved usage; accounts never checked are checked once here (first view after sign-in or install). */
+async function handleGetUsage(res: ServerResponse): Promise<void> {
+  try {
+    sendJson(res, 200, { ok: true, accounts: await readRelayAccountUsage({ fetchMissing: true }) });
+  } catch {
+    sendJson(res, 500, { ok: false, error: 'Could not read usage.' });
+  }
+}
+
+/** Manual usage check: one account (`providerId`) or every signed-in account. */
+async function handleUsageRefresh(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  try {
+    const raw = await readBody(req);
+    const body = (raw.trim() ? JSON.parse(raw) : {}) as { providerId?: unknown };
+    if (body.providerId !== undefined && typeof body.providerId !== 'string') {
+      sendJson(res, 400, { ok: false, error: 'providerId must be a string' }); return;
+    }
+    const providerIds = typeof body.providerId === 'string' ? [body.providerId] : undefined;
+    sendJson(res, 200, { ok: true, accounts: await getRelayAccountUsage({ providerIds }) });
+  } catch {
+    sendJson(res, 400, { ok: false, error: 'Could not check usage.' });
+  }
+}
+
 async function handleIntelligenceRemove(res: ServerResponse): Promise<void> {
   await removeIntelligence();
   sendJson(res, 200, { ok: true, ...(await intelligenceStatusBody()) });
@@ -1535,6 +1589,11 @@ function handleGetApps(res: ServerResponse): void {
 
 
 /** Maps a `relay-ai ui` app card id to the launch target `target-compatibility.ts` understands. */
+/** Launch targets that can start on the Relay Free Pool, and the pool target each one is served from. */
+const POOL_TARGET_FOR_LAUNCH: Partial<Record<RelayLaunchTarget, 'claude' | 'codex' | 'antigravity'>> = {
+  claude: 'claude', 'claude-app': 'claude', codex: 'codex', 'codex-app': 'codex', antigravity: 'antigravity',
+};
+
 const APP_ID_TO_LAUNCH_TARGET: Record<string, RelayLaunchTarget> = {
   claude: 'claude',
   'claude-app': 'claude-app',
@@ -1554,8 +1613,8 @@ async function handleLaunchApp(req: IncomingMessage, res: ServerResponse, opts: 
     const withNative = body.withNative === true;
     const pool = body.pool === true;
     if (body.pool !== undefined && typeof body.pool !== 'boolean') { sendJson(res, 400, { error: 'pool must be a boolean' }); return; }
-    if (pool && (!['claude', 'codex'].includes(body.appId) || body.favorites || body.providerId || body.modelId || body.httpProxy || body.withNative)) {
-      sendJson(res, 400, { error: 'Choose the free pool alone for Claude Code CLI or Codex CLI.' }); return;
+    if (pool && (!POOL_LAUNCH_APPS.has(body.appId) || body.favorites || body.providerId || body.modelId || body.httpProxy || body.withNative)) {
+      sendJson(res, 400, { error: 'Choose the free pool alone; Gemini CLI cannot start on it.' }); return;
     }
     let { providerId, modelId } = body as { providerId?: string; modelId?: string };
     if (!appId) {

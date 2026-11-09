@@ -28,6 +28,7 @@ import { pickerRefresh } from './picker-refresh.js';
 import { prepareClaudeAutoPool, type ClaudeAutoPool } from './pool/claude-launch.js';
 import { CLAUDE_POOL_MODEL_ID } from './pool/claude-runtime.js';
 import type { ServerModelInfo } from './server/models.js';
+import { printUiUrlLast } from './ui-background.js';
 
 export { modelToServerModelInfo } from './claude-desktop/model-catalog.js';
 
@@ -177,7 +178,13 @@ export async function runClaudeAppCommand(args: string[], boot?: { launchProvide
     }
   }
 
-  if (boot?.launchProvider && boot?.launchModel) {
+  if (boot?.launchProvider === 'relay-free-pool' && boot.launchModel === 'relay-free-pool') {
+    if (!autoPool) {
+      p.log.error('Relay Free Pool is not ready for Claude Desktop. Turn it on and add a tested member in relay-ai ui (Free Pool).');
+      return 1;
+    }
+    startOnPool = true;
+  } else if (boot?.launchProvider && boot?.launchModel) {
     const bootSelection = resolveBootSelection(
       compatible,
       boot.launchProvider,
@@ -362,6 +369,7 @@ export async function runClaudeAppCommand(args: string[], boot?: { launchProvide
       console.log(`${pc.dim('Catalog:')}  ${serverModels.length} models (${parts.join(' + ')})`);
     }
     console.log(`${pc.cyan('Press Ctrl+C to stop and restore config.')}`);
+    printUiUrlLast();
 
     await waitForShutdown();
     console.log('');

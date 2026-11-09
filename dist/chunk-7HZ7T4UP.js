@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 import {
+  buildIntelligenceLookup,
+  loadIntelligenceCache
+} from "./chunk-4RCYRXSV.js";
+import {
   clearDisabledPoolMember,
   disabledMessage,
   disabledPoolMembers,
@@ -25,6 +29,7 @@ import {
   loadPreferences,
   loadRegistry,
   modelsDevModelKind,
+  moveFreePoolMemberTo,
   nameKindOutranksChatTest,
   parseFreePool,
   poolEndpointRevision,
@@ -167,7 +172,8 @@ async function verifyUiPoolMember(providerId, modelId, signal, options = {}) {
 }
 async function handlePoolApi(req, res) {
   try {
-    const providers = await fetchProviderCatalog();
+    let catalog;
+    const loadCatalog = async () => catalog ??= await fetchProviderCatalog();
     let pool = parseFreePool(loadPreferences().freePool);
     if (req.method === "POST") {
       const body = JSON.parse(await readBody(req));
@@ -181,7 +187,7 @@ async function handlePoolApi(req, res) {
         if (typeof member.providerId !== "string" || typeof member.modelId !== "string") throw new Error("Choose a provider account and model");
         const index = pool.members.findIndex((item) => item.providerId === member.providerId && item.modelId === member.modelId);
         if (body.action === "add") {
-          const provider = providers.find((item) => item.id === member.providerId);
+          const provider = (await loadCatalog()).find((item) => item.id === member.providerId);
           const model = provider?.models.find((item) => item.id === member.modelId);
           if (!provider || !model) throw new Error("Model is unavailable or hidden");
           const reason = poolMembershipProblem(provider, model) ?? failedTestProblem(member.providerId, member.modelId);
@@ -189,12 +195,16 @@ async function handlePoolApi(req, res) {
           pool = addFreePoolMember(pool, member);
         } else if (body.action === "remove") pool = removeFreePoolMember(pool, member);
         else if (body.action === "move") {
-          if (index < 0 || ![-1, 1].includes(body.direction)) throw new Error("Invalid priority change");
-          const next = index + body.direction;
-          if (next >= 0 && next < pool.members.length) [pool.members[index], pool.members[next]] = [pool.members[next], pool.members[index]];
+          if (index < 0) throw new Error("Invalid priority change");
+          if (Number.isInteger(body.toIndex)) {
+            pool = moveFreePoolMemberTo(pool, member, body.toIndex);
+          } else if ([-1, 1].includes(body.direction)) {
+            const next = index + body.direction;
+            if (next >= 0 && next < pool.members.length) pool = moveFreePoolMemberTo(pool, member, next);
+          } else throw new Error("Invalid priority change");
         } else if (body.action === "verify") {
           if (index < 0) throw new Error("Add the model to the pool first");
-          const provider = providers.find((item) => item.id === member.providerId);
+          const provider = (await loadCatalog()).find((item) => item.id === member.providerId);
           const model = provider?.models.find((item) => item.id === member.modelId);
           if (!provider || !model) throw new Error("Model is unavailable or hidden");
           const result = await verifyUiPoolMember(member.providerId, member.modelId, AbortSignal.timeout(body.reasoning === true ? 1e5 : 2e4), { reasoning: body.reasoning === true });
@@ -207,6 +217,7 @@ async function handlePoolApi(req, res) {
       sendJson(res, 200, { ok: true });
       return;
     }
+    const providers = await loadCatalog();
     sendJson(res, 200, { ...poolView(providers, pool, await disabledPoolMembers(providers, pool)), activity: poolActivityView() });
   } catch (error) {
     sendJson(res, 400, { error: error instanceof Error ? error.message : "Unable to update the free pool" });
@@ -249,7 +260,6 @@ function poolView(providers, pool, disabled = /* @__PURE__ */ new Map()) {
       // The window routing actually uses is the one saved by the last Test; it can lag a size set or measured since.
       routingContextWindow: receipt?.contextWindow,
       targets: receipt?.targets ?? [],
-      expiresAt: receipt?.expiresAt,
       effortLevels: receipt?.effortLevels ?? []
     };
   });

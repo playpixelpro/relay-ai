@@ -9,6 +9,7 @@ import {
 } from './provider-model-browser.js';
 import { copyDeviceCode, copyTextToClipboard, oauthConnectionLabel } from './oauth-device.js';
 import { providerInitial, providerLogoHtml } from './provider-logo.js';
+import { dropTarget, moveItem } from './drag-order.js';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
@@ -25,8 +26,11 @@ const state = {
   poolProviders: [],   // selected provider ids for the free-model filter; empty = all
   poolPage: 1,
   poolBusy: false,
+  poolActivityLastUpdated: null,
 
   providers: [],
+  usage: {},                  // providerId → saved plan usage (GET /api/usage; checked on demand only)
+  usageRefreshing: new Set(), // providerIds with a manual check in flight
   intelligenceActive: false, // scores downloaded: show the Intelligence column
   intelligenceSort: null,    // null | 'desc' | 'asc'
   templates: [],   // unconfigured available templates
@@ -494,6 +498,7 @@ function buildProviderCard(provider) {
     <div class="provider-info">
       <div class="provider-name">${escapeHtml(displayName)}</div>
       <div class="provider-models-count">${provider.modelCount ?? provider.models?.length ?? 0} models</div>
+      ${provider.canEditServerUrl && provider.serverUrl ? `<div class="provider-server-url" title="Server address">${escapeHtml(provider.serverUrl)}</div>` : ''}
     </div>
     <div class="provider-status">
       <span class="status-chip ${provider.hasKey ? 'has-key' : provider.freeAccess ? 'free-access' : 'no-key'}">
@@ -530,9 +535,100 @@ function buildProviderCard(provider) {
     }
   });
 
+  const usage = document.createElement('div');
+  usage.className = 'provider-usage';
+  usage.dataset.usageFor = provider.id;
+  renderUsageStrip(usage, provider.id);
+
   card.appendChild(header);
+  card.appendChild(usage);
   card.appendChild(body);
   return card;
+}
+
+// ─── Plan usage (per signed-in account; checked on demand, never on a timer) ──
+
+async function loadUsage() {
+  try {
+    const data = await api('GET', '/api/usage');
+    if (data.ok) applyUsage(data.accounts);
+  } catch { /* usage is optional */ }
+}
+
+function applyUsage(accounts) {
+  for (const account of accounts ?? []) state.usage[account.providerId] = account;
+  document.querySelectorAll('.provider-usage').forEach(el => renderUsageStrip(el, el.dataset.usageFor));
+}
+
+async function refreshUsage(providerId) {
+  if (state.usageRefreshing.has(providerId)) return;
+  state.usageRefreshing.add(providerId);
+  applyUsage([]);
+  try {
+    const data = await api('POST', '/api/usage/refresh', { providerId });
+    if (!data.ok) showToast(data.error || 'Could not check usage');
+    const account = data.accounts?.[0];
+    if (account?.error) showToast(account.error.message);
+    state.usageRefreshing.delete(providerId);
+    applyUsage(data.accounts);
+  } catch {
+    state.usageRefreshing.delete(providerId);
+    applyUsage([]);
+    showToast('Could not check usage');
+  }
+}
+
+function usageRelative(iso, future) {
+  const ms = Date.parse(iso) - Date.now();
+  if (!Number.isFinite(ms)) return '';
+  const mins = Math.round(Math.abs(ms) / 60000);
+  const text = mins < 1 ? 'now' : mins < 60 ? `${mins}m` : mins < 48 * 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${Math.round(mins / 1440)}d`;
+  if (future) return ms <= 0 ? 'reset' : `resets in ${text}`;
+  return mins < 1 ? 'just now' : `${text} ago`;
+}
+
+function usageWindowHtml(w) {
+  const expired = w.resetsAt && Date.parse(w.resetsAt) <= Date.now();
+  const used = expired ? 0 : w.usedPercent;
+  const pct = used == null ? null : Math.max(0, Math.min(100, used));
+  const level = pct == null ? '' : pct >= 90 ? 'is-high' : pct >= 70 ? 'is-mid' : '';
+  const counts = w.limit != null && w.remaining != null ? ` · ${w.remaining}/${w.limit} left` : '';
+  const models = w.scope?.type === 'model-group' && w.scope.modelIds?.length ? w.scope.modelIds.join(', ') : '';
+  return `
+    <div class="usage-row" ${models ? `title="${escapeHtml(models)}"` : ''}>
+      <span class="usage-label">${escapeHtml(w.label)}</span>
+      <span class="usage-bar ${level}"><span style="width:${pct ?? 0}%"></span></span>
+      <span class="usage-pct">${pct == null ? '—' : `${Math.round(pct)}%`}</span>
+      <span class="usage-reset">${escapeHtml((w.resetsAt ? usageRelative(w.resetsAt, true) : '') + counts)}</span>
+    </div>`;
+}
+
+function renderUsageStrip(el, providerId) {
+  const account = state.usage[providerId];
+  if (!account || account.status === 'unsupported') { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  const busy = state.usageRefreshing.has(providerId);
+  const checked = account.fetchedAt ? `checked ${usageRelative(account.fetchedAt, false)}` : 'not checked yet';
+  const balances = account.balances ?? [];
+  const rows = account.windows.map(usageWindowHtml).join('') + balances.map(b => `
+    <div class="usage-row usage-balance">
+      <span class="usage-label">${escapeHtml(b.label)}</span>
+      <span class="usage-amount">US$${Number(b.amount).toFixed(2)}</span>
+    </div>`).join('');
+  const note = account.error
+    ? `<div class="usage-note is-error">${escapeHtml(account.error.message)}${account.windows.length ? ' Showing the last reading.' : ''}</div>`
+    : account.status === 'ok' && !account.windows.length && !balances.length ? '<div class="usage-note">No usage limits reported.</div>' : '';
+  el.innerHTML = `
+    <div class="usage-head">
+      <span class="usage-title">Plan usage${account.limitReached ? ' · <span class="usage-limit">limit reached</span>' : ''}</span>
+      <span class="usage-checked">${escapeHtml(checked)}</span>
+      <button class="btn btn-ghost btn-sm usage-refresh" type="button" ${busy ? 'disabled' : ''}>${busy ? 'Checking…' : 'Refresh'}</button>
+    </div>
+    ${rows}${note}`;
+  el.querySelector('.usage-refresh').addEventListener('click', event => {
+    event.stopPropagation();
+    refreshUsage(providerId);
+  });
 }
 
 function providerIdFromHash() {
@@ -548,6 +644,8 @@ function providerIdFromHash() {
 function openProviderModelBrowser(providerId) {
   if (state.activeProviderId !== providerId) {
     state.providerModelFilter = '';
+    state.providerModelMinCtx = 0;
+    state.providerModelFreeOnly = false;
     state.providerModelPage = 1;
   }
   window.location.hash = `provider/${encodeURIComponent(providerId)}`;
@@ -556,9 +654,18 @@ function openProviderModelBrowser(providerId) {
 function syncProviderModelBrowserFromHash() {
   const providerId = providerIdFromHash();
   const content = document.getElementById('content');
+  if (state.activeProviderId !== providerId) {
+    state.providerModelFilter = '';
+    state.providerModelMinCtx = 0;
+    state.providerModelFreeOnly = false;
+    state.providerModelPage = 1;
+  }
   state.activeProviderId = providerId;
   content.classList.toggle('provider-browser-open', Boolean(providerId));
-  if (!providerId) return;
+  if (!providerId) {
+    state.providerModelFreeOnly = false;
+    return;
+  }
   document.querySelectorAll('.nav-item').forEach(item => {
     item.classList.toggle('active', item.dataset.section === 'providers');
   });
@@ -1097,8 +1204,12 @@ function bulkBarHtml(provider) {
   const selected = selectionFor(provider.id);
   const nonChat = (provider.models ?? []).filter(model => isKnownNonChat(model) && !model.hidden).length;
   const select = `<button class="btn btn-ghost" id="model-select-non-chat" type="button" ${nonChat ? '' : 'disabled'} title="Tick every visible model whose type is known and is not chat, so you can review before hiding">Select non-chat (${nonChat})</button>`;
-  if (selected.size === 0) return select;
-  return `${select}
+  const hiddenCount = (provider.models ?? []).filter(model => model.hidden).length;
+  const unhideAll = hiddenCount
+    ? `<button class="btn btn-ghost" id="model-unhide-all" type="button" title="Make every hidden model visible again">Unhide all (${hiddenCount})</button>`
+    : '';
+  if (selected.size === 0) return `${select}${unhideAll}`;
+  return `${select}${unhideAll}
     <span class="model-bulk-count">${selected.size} selected</span>
     <button class="btn btn-ghost" id="model-bulk-hide" type="button">Hide</button>
     <button class="btn btn-ghost" id="model-bulk-unhide" type="button">Unhide</button>
@@ -1126,12 +1237,12 @@ function bindModelSelection(container, provider, pageItems) {
     renderProviderModelBrowser();
   });
   document.getElementById('model-bulk-clear')?.addEventListener('click', () => { selected.clear(); renderProviderModelBrowser(); });
-  const bulk = async hidden => {
-    const modelIds = [...selected];
+  const bulk = async (hidden, ids) => {
+    const modelIds = ids ?? [...selected];
     const result = await api('POST', '/api/providers/models/hide-many', { providerId: provider.id, modelIds, hidden });
     if (!result.ok) { showToast(result.error ?? 'Could not change these models'); return; }
     for (const model of provider.models ?? []) {
-      if (!selected.has(model.id)) continue;
+      if (!modelIds.includes(model.id)) continue;
       if (hidden) model.hidden = true;
       else delete model.hidden;
     }
@@ -1145,6 +1256,10 @@ function bindModelSelection(container, provider, pageItems) {
   };
   document.getElementById('model-bulk-hide')?.addEventListener('click', () => bulk(true));
   document.getElementById('model-bulk-unhide')?.addEventListener('click', () => bulk(false));
+  document.getElementById('model-unhide-all')?.addEventListener('click', () => {
+    const ids = (provider.models ?? []).filter(model => model.hidden).map(model => model.id);
+    if (ids.length) bulk(false, ids);
+  });
 }
 
 const MEASURE_CONCURRENCY = 3;
@@ -2497,9 +2612,17 @@ function buildAddKeyAccountRow(provider) {
 function buildServerUrlRow(provider) {
   const wrapper = document.createElement('div');
   wrapper.style.cssText = 'margin-top:12px;padding-top:12px;border-top:1px solid oklch(22% 0.015 265)';
+  const current = document.createElement('div');
+  current.className = 'server-url-current';
+  const label = document.createElement('span');
+  label.textContent = 'Server address';
+  const address = document.createElement('code');
+  address.textContent = provider.serverUrl || 'not set';
   const editBtn = document.createElement('button');
   editBtn.className = 'btn btn-ghost';
-  editBtn.textContent = 'Edit server address';
+  editBtn.textContent = 'Edit';
+  editBtn.setAttribute('aria-label', 'Edit server address');
+  current.append(label, address, editBtn);
   const form = document.createElement('div');
   form.style.cssText = 'display:none;align-items:center;gap:8px;flex-wrap:wrap';
   const urlInput = document.createElement('input');
@@ -2518,9 +2641,9 @@ function buildServerUrlRow(provider) {
   const feedback = document.createElement('div');
   feedback.className = 'key-feedback';
   form.append(urlInput, saveBtn, cancelBtn);
-  wrapper.append(editBtn, form, feedback);
-  editBtn.addEventListener('click', () => { editBtn.style.display = 'none'; form.style.display = 'flex'; urlInput.focus(); });
-  cancelBtn.addEventListener('click', () => { form.style.display = 'none'; editBtn.style.display = ''; feedback.textContent = ''; });
+  wrapper.append(current, form, feedback);
+  editBtn.addEventListener('click', () => { current.style.display = 'none'; form.style.display = 'flex'; urlInput.focus(); });
+  cancelBtn.addEventListener('click', () => { form.style.display = 'none'; current.style.display = ''; feedback.textContent = ''; });
   saveBtn.addEventListener('click', async () => {
     const baseUrl = urlInput.value.trim();
     if (!baseUrl) { feedback.textContent = 'Enter a server address.'; feedback.className = 'key-feedback error'; return; }
@@ -2992,21 +3115,40 @@ async function loadFreePool() {
   // A slower earlier request must never overwrite a newer catalog.
   if (sequence !== poolLoadSequence) return;
   state.pool = next;
+  state.poolActivityLastUpdated = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   renderFreePool();
 }
 
 
+function formatPoolActivityTime(when) {
+  if (Number.isNaN(when.getTime())) return '';
+  const now = new Date();
+  const sameYear = when.getFullYear() === now.getFullYear();
+  const dateStr = when.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
+  const timeStr = when.toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  return `${dateStr}, ${timeStr}`;
+}
+
 // Which pool member is answering, and only the moments something happened (failure, failover, switch).
 function poolActivityRowHtml(request, label) {
   const when = new Date(request.at);
-  const time = Number.isNaN(when.getTime()) ? '' : when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const time = formatPoolActivityTime(when);
+  const stamp = Number.isNaN(when.getTime()) ? '' : when.toLocaleString();
   const answered = request.outcome === 'answered' && request.answeredBy;
   const secs = typeof request.ms === 'number' ? `${(request.ms / 1000).toFixed(1)}s` : '';
   const head = answered
     ? `<span class="pool-activity-event">${escapeHtml(label)}</span><span class="provider-pill" style="${providerPillStyle(request.answeredBy.providerId)}">${escapeHtml(request.answeredBy.providerId)}</span><code>${escapeHtml(request.answeredBy.modelId)}</code><span class="pool-activity-reason">${escapeHtml(secs)}</span>`
     : '<span class="pool-activity-event">✗ no model answered</span>';
   const tried = (request.tried ?? []).map(t => `<li><span class="pool-activity-failed">✗ ${escapeHtml(t.providerId)}/${escapeHtml(t.modelId)}</span> ${escapeHtml(t.reason ?? 'failed')}${t.detail ? `<span class="pool-activity-detail">${escapeHtml(t.detail)}</span>` : ''}</li>`).join('');
-  return `<li class="pool-activity-row ${answered && !tried ? 'is-served' : (answered ? 'is-failover' : 'is-failed')}"><span class="pool-activity-time">${escapeHtml(time)}</span>${head}${tried ? `<ul class="pool-activity-tried">${tried}</ul>` : ''}</li>`;
+  return `<li class="pool-activity-row ${answered && !tried ? 'is-served' : (answered ? 'is-failover' : 'is-failed')}"><span class="pool-activity-time"${stamp ? ` title="${escapeHtml(stamp)}"` : ''}>${escapeHtml(time)}</span>${head}${tried ? `<ul class="pool-activity-tried">${tried}</ul>` : ''}</li>`;
 }
 
 const POOL_EVENT_LABELS = { 'now-answering': '● answering', switched: '● switched to', failover: '↪ failover, answered by', failed: '✗' };
@@ -3024,9 +3166,22 @@ function poolActivityHtml(activity) {
   const empty = verbose
     ? 'No pool requests yet. When you use Relay Free Pool in a tool, each request shows up here.'
     : 'Nothing to report. Failures, failovers and model switches show up here; turn on "Show every request" to see all of them.';
+  const lastUpdated = state.poolActivityLastUpdated
+    ? `<span class="pool-activity-updated">Updated ${escapeHtml(state.poolActivityLastUpdated)}</span>`
+    : '';
   return `<div class="pool-section-head"><h2 class="pool-heading">Recent activity</h2><p class="section-sub">${verbose ? 'Every request.' : 'Only when something happens.'} Stored on this computer only (model names and short reasons, never prompts).</p></div>
     ${currentLine}
-    <label class="pool-toggle pool-activity-toggle"><input type="checkbox" id="pool-activity-verbose" ${verbose ? 'checked' : ''}><span>Show every request</span></label>
+    <div class="pool-activity-toolbar">
+      <label class="pool-toggle pool-activity-toggle"><input type="checkbox" id="pool-activity-verbose" ${verbose ? 'checked' : ''}><span>Show every request</span></label>
+      <div class="pool-activity-actions">
+        ${lastUpdated}
+        <button class="btn btn-ghost" id="pool-activity-clear" type="button" title="Clear all recorded pool activity logs">Clear logs</button>
+        <button class="btn btn-ghost" id="pool-activity-refresh" type="button" title="Refresh latest pool activity logs">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          Refresh
+        </button>
+      </div>
+    </div>
     <ul class="pool-activity">${rows.join('') || `<li class="pool-activity-empty">${escapeHtml(empty)}</li>`}</ul>`;
 }
 
@@ -3034,10 +3189,44 @@ function poolActivityHtml(activity) {
 function renderPoolActivity(pool) {
   const panel = document.getElementById('pool-activity-panel');
   if (!panel) return;
-  panel.innerHTML = poolActivityHtml(pool.activity);
+  panel.innerHTML = poolActivityHtml(pool?.activity);
   document.getElementById('pool-activity-verbose')?.addEventListener('change', event => {
     state.poolActivityVerbose = event.currentTarget.checked;
     renderPoolActivity(pool);
+  });
+  document.getElementById('pool-activity-clear')?.addEventListener('click', async () => {
+    const btn = document.getElementById('pool-activity-clear');
+    if (btn) btn.disabled = true;
+    try {
+      const res = await api('POST', '/api/pool/activity/clear');
+      if (res?.ok) {
+        showToast('Pool activity logs cleared');
+        await loadFreePool();
+      } else {
+        showToast(res?.error || 'Could not clear logs');
+      }
+    } catch {
+      showToast('Could not clear logs');
+    } finally {
+      const activeBtn = document.getElementById('pool-activity-clear');
+      if (activeBtn) activeBtn.disabled = false;
+    }
+  });
+  document.getElementById('pool-activity-refresh')?.addEventListener('click', async () => {
+    const btn = document.getElementById('pool-activity-refresh');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Refreshing…';
+    }
+    try {
+      await loadFreePool();
+    } finally {
+      const activeBtn = document.getElementById('pool-activity-refresh');
+      if (activeBtn) {
+        activeBtn.disabled = false;
+        activeBtn.textContent = 'Refresh';
+      }
+    }
   });
 }
 
@@ -3094,20 +3283,27 @@ function poolMemberRowHtml(member, index, manageable) {
   const reason = member.reason ? `<div class="pool-member-reason">${escapeHtml(member.reason)}</div>` : '';
   const actions = manageable ? `
     <div class="pool-member-actions">
-      <button class="btn btn-ghost pool-test" type="button" data-provider-id="${escapeHtml(member.providerId)}" data-model-id="${escapeHtml(member.modelId)}" title="One small request, up to 1024 output tokens. No retries or context/reasoning probes.">Test</button>
-      <button class="btn btn-ghost pool-move" type="button" data-provider-id="${escapeHtml(member.providerId)}" data-model-id="${escapeHtml(member.modelId)}" data-direction="-1" ${index === 0 ? 'disabled' : ''} title="Move earlier in routing priority" aria-label="Move ${escapeHtml(member.name)} up">↑</button>
-      <button class="btn btn-ghost pool-move" type="button" data-provider-id="${escapeHtml(member.providerId)}" data-model-id="${escapeHtml(member.modelId)}" data-direction="1" ${index === poolData().members.length - 1 ? 'disabled' : ''} title="Move later in routing priority" aria-label="Move ${escapeHtml(member.name)} down">↓</button>
+      <button class="btn btn-ghost pool-test" type="button" draggable="false" data-provider-id="${escapeHtml(member.providerId)}" data-model-id="${escapeHtml(member.modelId)}" title="One small request, up to 1024 output tokens. No retries or context/reasoning probes.">Test</button>
+      <button class="btn btn-ghost pool-move" type="button" draggable="false" data-provider-id="${escapeHtml(member.providerId)}" data-model-id="${escapeHtml(member.modelId)}" data-direction="-1" ${index === 0 ? 'disabled' : ''} title="Move earlier in routing priority" aria-label="Move ${escapeHtml(member.name)} up">↑</button>
+      <button class="btn btn-ghost pool-move" type="button" draggable="false" data-provider-id="${escapeHtml(member.providerId)}" data-model-id="${escapeHtml(member.modelId)}" data-direction="1" ${index === poolData().members.length - 1 ? 'disabled' : ''} title="Move later in routing priority" aria-label="Move ${escapeHtml(member.name)} down">↓</button>
       <details class="pool-advanced-menu">
-        <summary class="btn btn-ghost">Advanced…</summary>
+        <summary class="btn btn-ghost" draggable="false">Advanced…</summary>
         <div class="pool-advanced-options">
-          <button class="btn btn-ghost pool-context" type="button" data-provider-id="${escapeHtml(member.providerId)}" data-model-id="${escapeHtml(member.modelId)}">Measure context · 1 request</button>
-          <button class="btn btn-ghost pool-set-context" type="button" data-provider-id="${escapeHtml(member.providerId)}" data-model-id="${escapeHtml(member.modelId)}" data-current="${member.contextWindow ?? ''}">Set context${member.contextWindow ? ` (now ${fmtCtx(member.contextWindow)})` : ''} · no requests</button>
-          ${member.reasoningTestRequests > 1 ? '<button class="btn btn-ghost pool-reasoning" type="button" data-provider-id="' + escapeHtml(member.providerId) + '" data-model-id="' + escapeHtml(member.modelId) + '" data-requests="' + member.reasoningTestRequests + '">Check reasoning · up to ' + member.reasoningTestRequests + ' requests</button>' : ''}
+          <button class="btn btn-ghost pool-context" type="button" draggable="false" data-provider-id="${escapeHtml(member.providerId)}" data-model-id="${escapeHtml(member.modelId)}">Measure context · 1 request</button>
+          <button class="btn btn-ghost pool-set-context" type="button" draggable="false" data-provider-id="${escapeHtml(member.providerId)}" data-model-id="${escapeHtml(member.modelId)}" data-current="${member.contextWindow ?? ''}">Set context${member.contextWindow ? ` (now ${fmtCtx(member.contextWindow)})` : ''} · no requests</button>
+          ${member.reasoningTestRequests > 1 ? '<button class="btn btn-ghost pool-reasoning" type="button" draggable="false" data-provider-id="' + escapeHtml(member.providerId) + '" data-model-id="' + escapeHtml(member.modelId) + '" data-requests="' + member.reasoningTestRequests + '">Check reasoning · up to ' + member.reasoningTestRequests + ' requests</button>' : ''}
         </div>
       </details>
-      <button class="btn btn-ghost pool-remove" type="button" data-provider-id="${escapeHtml(member.providerId)}" data-model-id="${escapeHtml(member.modelId)}" title="Remove from the Relay Free Pool">Remove</button>
+      <button class="btn btn-ghost pool-remove" type="button" draggable="false" data-provider-id="${escapeHtml(member.providerId)}" data-model-id="${escapeHtml(member.modelId)}" title="Remove from the Relay Free Pool">Remove</button>
     </div>` : '';
-  return `<li class="pool-member-row">
+  const handle = manageable
+    ? `<span class="drag-handle" aria-hidden="true" title="Drag to change routing priority"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="8" y="4" width="3" height="3" rx="1"/><rect x="13" y="4" width="3" height="3" rx="1"/><rect x="8" y="10" width="3" height="3" rx="1"/><rect x="13" y="10" width="3" height="3" rx="1"/><rect x="8" y="16" width="3" height="3" rx="1"/><rect x="13" y="16" width="3" height="3" rx="1"/></svg></span>`
+    : '';
+  const dragAttrs = manageable
+    ? ` draggable="true" tabindex="0" data-index="${index}" data-provider-id="${escapeHtml(member.providerId)}" data-model-id="${escapeHtml(member.modelId)}" aria-grabbed="false" aria-label="${escapeHtml(member.name)}, priority ${index + 1}. Drag or Alt+Arrow to reorder."`
+    : '';
+  return `<li class="pool-member-row"${dragAttrs}>
+    ${handle}
     <span class="pool-rank" aria-hidden="true">${index + 1}</span>
     <div class="pool-member-main">
       <div class="pool-member-title">
@@ -3156,7 +3352,9 @@ function renderFreePool() {
 
   renderFreePoolStats(pool);
   renderPoolActivity(pool);
-  const manageable = !isServerAdminUi();
+  // Pool settings live on the same volume as the gateway catalog in server admin
+  // mode, so Enable, Test, Add and reorder are real actions there too.
+  const manageable = true;
   const tasks = pool.candidates ?? [];
   assignPoolProviderColors([...tasks, ...(pool.members ?? [])].map(item => item.providerId));
   // Provider accounts present in the list, in first-seen order.
@@ -3200,20 +3398,21 @@ function renderFreePool() {
     : '';
   const readyCount = members.filter(member => member.status === 'Ready').length;
   const enabledStatus = !enabled
-    ? 'Off. Relay Free Pool is not added to any launch.'
+    ? 'Off. Relay Free Pool is not added to any launch or the gateway.'
     : members.length === 0
       ? 'On, but the pool is empty, so nothing is added yet. Add a model below.'
       : readyCount === 0
         ? 'On, but no pool model is tested and ready yet, so nothing is added yet. Test a model below.'
-        : `On. Relay Free Pool is added to your launches (${readyCount} of ${members.length} model${members.length === 1 ? '' : 's'} ready).`;
+        : `On. Relay Free Pool is added to your launches and the gateway (${readyCount} of ${members.length} model${members.length === 1 ? '' : 's'} ready).`;
   const controls = manageable ? `
     <div class="pool-controls pool-feature">
       <label class="pool-toggle">
         <input type="checkbox" id="free-pool-enabled" ${enabled ? 'checked' : ''}>
-        <span>Add Relay Free Pool to my launches</span>
+        <span>Enable Relay Free Pool</span>
       </label>
       <p class="pool-feature-status ${enabled && readyCount > 0 ? 'is-on' : ''}">${escapeHtml(enabledStatus)}</p>
-      <p class="pool-feature-help">When on, every Claude, Codex, ChatGPT app and Antigravity launch also lists <strong>Relay Free Pool</strong> as one extra model in the model switcher, next to the model you picked and your favorites. It is never chosen for you: pick it to use it. When you do, Relay sends each request to the first ready model in the list above and moves to the next if one fails or runs out. It never uses a model outside this pool. A model is only used while its saved Test result is valid, which is until its endpoint changes or you remove it. Turning this off just removes the extra entry.</p>
+      <p class="pool-feature-help">When on, every Claude, Codex, ChatGPT app and Antigravity launch also lists <strong>Relay Free Pool</strong> as one extra model in the model switcher, next to the model you picked and your favorites. The Relay API gateway also serves it as one model on both its Anthropic and OpenAI endpoints while the gateway is running. It is never chosen for you: pick it to use it. When you do, Relay sends each request to the first ready model in the list above and moves to the next if one fails or runs out. It never uses a model outside this pool. A model is only used while its saved Test result is valid, which is until its endpoint changes or you remove it. Turning this off just removes the extra entry.</p>
+      ${state.server?.status?.running ? '<p class="pool-hint">The gateway keeps the model list from when it started. Restart it on the Server tab after changing the pool.</p>' : ''}
     </div>
     <div class="pool-controls pool-effort-card">
       <label class="pool-effort">
@@ -3341,7 +3540,10 @@ function renderFreePool() {
       showToast(result.error ?? 'Could not change the pool', undefined, 5000);
       return;
     }
-    showToast(next ? 'Relay Free Pool is on. Pick it as a model in your tool.' : 'Relay Free Pool is off');
+    const gatewayNote = state.server?.status?.running
+      ? ' Restart the gateway on the Server tab to add or remove the model.' : '';
+    showToast((next ? 'Relay Free Pool is on. Pick it as a model in your tool.' : 'Relay Free Pool is off') + gatewayNote,
+      undefined, gatewayNote ? 6000 : 2200);
     await loadFreePool();
   });
   document.getElementById('free-pool-effort')?.addEventListener('change', async event => {
@@ -3353,10 +3555,52 @@ function renderFreePool() {
     }
     await loadFreePool();
   });
-  panel.querySelectorAll('.pool-test').forEach(button => {
+  const outsideMembers = el => !el.closest('.pool-member-list');
+  [...panel.querySelectorAll('.pool-test')].filter(outsideMembers).forEach(button => {
     button.addEventListener('click', () => testModelResponse(button, button.dataset.providerId, button.dataset.modelId, { pool: true }));
   });
-  panel.querySelectorAll('.pool-context, .pool-reasoning, .pool-set-context, .pool-move').forEach(button => {
+  const memberList = panel.querySelector('.pool-member-list');
+  if (memberList) bindPoolMemberRows(memberList);
+  [...panel.querySelectorAll('.pool-add')].forEach(button => {
+    button.addEventListener('click', () => toggleFreePoolModel(button.dataset.providerId, button.dataset.modelId, button, 'add'));
+  });
+  [...panel.querySelectorAll('.pool-remove')].filter(outsideMembers).forEach(button => {
+    button.addEventListener('click', () => toggleFreePoolModel(button.dataset.providerId, button.dataset.modelId, button, 'remove'));
+  });
+  panel.querySelectorAll('.pool-hide').forEach(button => {
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      await toggleModelHidden(button.dataset.providerId, button.dataset.modelId);
+      await loadFreePool();
+    });
+  });
+}
+
+/** Redraw only the "In the pool" list from local state (no request, no full panel render). */
+function renderPoolMemberList() {
+  const list = document.querySelector('#free-pool-panel .pool-member-list');
+  const members = poolData()?.members ?? [];
+  if (!list) return;
+  const manageable = true;
+  list.innerHTML = members.map((member, index) => poolMemberRowHtml(member, index, manageable)).join('');
+  bindPoolMemberRows(list);
+}
+
+function bindPoolMemberRows(list) {
+  list.querySelectorAll('.pool-test').forEach(button => {
+    button.addEventListener('click', () => testModelResponse(button, button.dataset.providerId, button.dataset.modelId, { pool: true }));
+  });
+  list.querySelectorAll('.pool-remove').forEach(button => {
+    button.addEventListener('click', () => toggleFreePoolModel(button.dataset.providerId, button.dataset.modelId, button, 'remove'));
+  });
+  list.querySelectorAll('.pool-move').forEach(button => {
+    button.addEventListener('click', () => {
+      const from = Number.parseInt(button.closest('.pool-member-row')?.dataset.index ?? '', 10);
+      if (Number.isInteger(from)) void reorderPoolMember(from, from + Number(button.dataset.direction), { focus: true });
+    });
+  });
+  bindPoolMemberDrag(list);
+  list.querySelectorAll('.pool-context, .pool-reasoning, .pool-set-context').forEach(button => {
     button.addEventListener('click', async () => {
       const { providerId, modelId } = button.dataset;
       button.disabled = true;
@@ -3373,9 +3617,6 @@ function renderFreePool() {
           if (contextWindow !== null && (!Number.isSafeInteger(contextWindow) || contextWindow <= 0)) { showToast('Enter a positive token count or reset.'); return; }
           const result = await api('POST', '/api/providers/models/context', { providerId, modelId, contextWindow });
           showToast(result.ok ? 'Context size saved. Run Test to update pool readiness.' : (result.error || 'Could not save context.'));
-        } else if (button.classList.contains('pool-move')) {
-          const result = await api('POST', '/api/pool', { action: 'move', providerId, modelId, direction: Number(button.dataset.direction) });
-          if (!result.ok) showToast(result.error || 'Could not change priority.');
         } else {
           if (!window.confirm('Check reasoning: up to ' + button.dataset.requests + ' extra requests, with no retries. These consume message and token quota. Continue?')) return;
           const result = await api('POST', '/api/pool', { action: 'verify', providerId, modelId, reasoning: true });
@@ -3386,17 +3627,101 @@ function renderFreePool() {
       finally { button.disabled = false; }
     });
   });
-  panel.querySelectorAll('.pool-add').forEach(button => {
-    button.addEventListener('click', () => toggleFreePoolModel(button.dataset.providerId, button.dataset.modelId, button, 'add'));
+}
+
+/**
+ * Reorder locally first so the list updates on the drop, then save. The order is the only thing a move
+ * changes, so no pool reload follows; a failed save puts the old order back.
+ */
+async function reorderPoolMember(fromIndex, toIndex, { focus = false } = {}) {
+  const pool = poolData();
+  const members = pool?.members ?? [];
+  const member = members[fromIndex];
+  if (!member || fromIndex === toIndex || toIndex < 0 || toIndex >= members.length) return;
+  const previous = members;
+  pool.members = moveItem(members, fromIndex, toIndex);
+  renderPoolMemberList();
+  if (focus) document.querySelector(`#free-pool-panel .pool-member-row[data-index="${toIndex}"]`)?.focus();
+  try {
+    const result = await api('POST', '/api/pool', {
+      action: 'move', providerId: member.providerId, modelId: member.modelId, toIndex,
+    });
+    if (result.error || result.ok === false) throw new Error(result.error ?? 'Could not change priority.');
+  } catch (error) {
+    if (poolData() === pool) {
+      pool.members = previous;
+      renderPoolMemberList();
+    }
+    showToast(error?.message || 'Could not change priority.', undefined, 5000);
+  }
+}
+
+/** Where a drag over the member list would land: between two rows, or onto a row (taking its place). */
+function poolDropTarget(list, pointerY, from) {
+  return dropTarget([...list.querySelectorAll('.pool-member-row')].map(row => row.getBoundingClientRect()), pointerY, from);
+}
+
+function clearPoolDropIndicators(list) {
+  list.querySelectorAll('.pool-member-row').forEach(el => el.classList.remove('drop-before', 'drop-after', 'drop-onto'));
+}
+
+function showPoolDropIndicator(list, target) {
+  clearPoolDropIndicators(list);
+  if (!target) return;
+  const rows = list.querySelectorAll('.pool-member-row');
+  if (target.kind === 'onto') rows[target.index]?.classList.add('drop-onto');
+  else if (target.slot < rows.length) rows[target.slot]?.classList.add('drop-before');
+  else rows[rows.length - 1]?.classList.add('drop-after');
+}
+
+function bindPoolMemberDrag(list) {
+  let dragFrom = null;
+  list.addEventListener('dragover', event => {
+    if (dragFrom === null) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    showPoolDropIndicator(list, poolDropTarget(list, event.clientY, dragFrom));
   });
-  panel.querySelectorAll('.pool-remove').forEach(button => {
-    button.addEventListener('click', () => toggleFreePoolModel(button.dataset.providerId, button.dataset.modelId, button, 'remove'));
+  list.addEventListener('dragleave', event => {
+    if (!list.contains(event.relatedTarget)) clearPoolDropIndicators(list);
   });
-  panel.querySelectorAll('.pool-hide').forEach(button => {
-    button.addEventListener('click', async () => {
-      button.disabled = true;
-      await toggleModelHidden(button.dataset.providerId, button.dataset.modelId);
-      await loadFreePool();
+  list.addEventListener('drop', event => {
+    if (dragFrom === null) return;
+    event.preventDefault();
+    const target = poolDropTarget(list, event.clientY, dragFrom);
+    const from = dragFrom;
+    clearPoolDropIndicators(list);
+    if (target) void reorderPoolMember(from, target.to);
+  });
+  list.querySelectorAll('.pool-member-row[draggable="true"]').forEach(row => {
+    row.addEventListener('dragstart', event => {
+      if (event.target.closest('button, summary, details, a, input, select')) {
+        event.preventDefault();
+        return;
+      }
+      dragFrom = Number.parseInt(row.dataset.index ?? '', 10);
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', row.dataset.index ?? '');
+      row.setAttribute('aria-grabbed', 'true');
+      requestAnimationFrame(() => row.classList.add('dragging'));
+    });
+    row.addEventListener('dragend', () => {
+      dragFrom = null;
+      row.classList.remove('dragging');
+      row.setAttribute('aria-grabbed', 'false');
+      clearPoolDropIndicators(list);
+    });
+    row.addEventListener('keydown', event => {
+      const from = Number.parseInt(row.dataset.index ?? '', 10);
+      const total = poolData()?.members?.length ?? 0;
+      if (!Number.isInteger(from)) return;
+      if (event.altKey && event.key === 'ArrowUp' && from > 0) {
+        event.preventDefault();
+        void reorderPoolMember(from, from - 1, { focus: true });
+      } else if (event.altKey && event.key === 'ArrowDown' && from < total - 1) {
+        event.preventDefault();
+        void reorderPoolMember(from, from + 1, { focus: true });
+      }
     });
   });
 }
@@ -3735,6 +4060,28 @@ function updateThemeIcon(isDark) {
   if (labelEl) labelEl.textContent = isDark ? 'Light mode' : 'Dark mode';
 }
 
+function initUiShutdown() {
+  const btn = document.getElementById('ui-shutdown-btn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    if (!window.confirm('Shut down the Relay UI server? This closes the local web interface.')) return;
+    btn.disabled = true;
+    btn.textContent = 'Shutting down…';
+    try {
+      await api('POST', '/api/ui/shutdown');
+    } catch {
+      // The server shuts down immediately so the connection may drop, which is expected.
+    }
+    document.body.innerHTML = `
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:inherit;color:var(--text-2, #8b949e);background:var(--bg, #0d1117);text-align:center;padding:24px;">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:16px;opacity:0.6;"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+        <h2 style="font-size:20px;font-weight:600;margin:0 0 8px;color:var(--text-1, #f0f6fc);">Relay UI has shut down</h2>
+        <p style="margin:0 0 16px;font-size:14px;max-width:400px;line-height:1.5;">The local server has stopped. You can safely close this browser tab, or run <code>relay ui</code> to restart it.</p>
+      </div>
+    `;
+  });
+}
+
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
 async function initModels() {
@@ -3749,6 +4096,8 @@ async function initModels() {
   }
   // Keep the Providers header counts in sync after add / delete / OAuth / refresh.
   renderProviderStats();
+  // Saved readings; accounts never checked (new install or sign-in) are checked once by the server.
+  void loadUsage();
   // Server tab caches its provider checklist — invalidate so new providers appear without a full reload.
   invalidateServerProviderCache();
 }
@@ -3763,6 +4112,7 @@ function invalidateServerProviderCache() {
 
 async function init() {
   initTheme();
+  initUiShutdown();
   initNav();
   void initUpdateIndicator();
 
@@ -3783,6 +4133,7 @@ async function init() {
   renderProviders(); // shows skeletons
 
   initServerPolling();
+  initPoolActivityPolling();
 
   // Load templates in parallel with models — re-render providers when done
   loadTemplates().then(() => renderProviders());
@@ -4476,6 +4827,19 @@ function initServerPolling() {
   });
 }
 
+function initPoolActivityPolling() {
+  setInterval(() => {
+    if (!document.hidden && window.location.hash === '#pool-activity') {
+      void loadFreePool();
+    }
+  }, 5000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && window.location.hash === '#pool-activity') {
+      void loadFreePool();
+    }
+  });
+}
+
 async function loadServerProviders() {
   if (state.server.form.providersLoaded) return;
   try {
@@ -4944,7 +5308,7 @@ window.toggleServerApiKeyVisibility = toggleServerApiKeyVisibility;
 
 // ─── Intelligence score (Artificial Analysis, optional, user's own key) ───────
 
-const INTEL_EXPLAIN = 'A single score from Artificial Analysis that combines many tests of reasoning, knowledge and coding. Higher means smarter overall. Use it to compare models, not as a promise for your task. Shown only when the model name matches exactly.';
+const INTEL_EXPLAIN = 'A single score from Artificial Analysis that combines many tests of reasoning, knowledge and coding. Higher means smarter overall. Use it to compare models, not as a promise for your task. Shown when the model id matches an Artificial Analysis entry (including dated checkpoints like Flash → Flash 1017). Effort variants are not guessed.';
 
 function intelTooltipText(intel) {
   return `Intelligence score ${Number(intel.score).toFixed(1)} (matched to "${intel.name}"). ${INTEL_EXPLAIN} Source: artificialanalysis.ai`;
@@ -4973,7 +5337,7 @@ function intelHeaderHtml() {
 
 function intelCellHtml(item) {
   if (!state.intelligenceActive) return '';
-  if (!item.intelligence) return '<td class="intel-cell"><span class="intel-none" title="No exact match on artificialanalysis.ai">—</span></td>';
+  if (!item.intelligence) return '<td class="intel-cell"><span class="intel-none" title="No matching score on artificialanalysis.ai (only models they publish an Intelligence Index for)">—</span></td>';
   return `<td class="intel-cell"><span class="intel-score" title="${escapeHtml(intelTooltipText(item.intelligence))}">${Number(item.intelligence.score).toFixed(1)}</span></td>`;
 }
 

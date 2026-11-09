@@ -1,19 +1,25 @@
 #!/usr/bin/env node
 import {
+  PoolHealthStore,
   describePoolFailure,
   forcedFailures,
+  materializeRegistry,
+  mergeHeaders,
   poolAccountScope,
   poolEndpointScope,
   poolErrorDetail,
   poolFailure,
   poolProviderHeaders,
   poolRouteMember,
+  poolRoutingProblem,
   providerRefreshToken,
   recordPoolActivity,
   resolveLocalProviderApiKey,
   retryPoolFailure
 } from "./chunk-UF5HSQ52.js";
 import {
+  copilotPlanTier,
+  filterCachedCopilotModels,
   stripGoogleModelPrefix
 } from "./chunk-CTHLP6OC.js";
 import {
@@ -23,6 +29,7 @@ import {
   formatUpstreamError
 } from "./chunk-GCAHVQ72.js";
 import {
+  REGISTRY_SCHEMA_VERSION,
   buildCodexReasoningLevels,
   createLanguageModel,
   currentPoolReceipt,
@@ -33,13 +40,18 @@ import {
   generateTextStreamingIfRequired,
   getReasoningCapabilities,
   grabRoundTripSignature,
+  isValidProviderId,
+  loadPreferences,
+  loadRegistry,
   localTimestamp,
   modelsDevCrossVendorOutputLimit,
   parseDsmlToolCalls,
+  parseFreePool,
   parseToolArguments,
   poolEndpointRevision,
   poolFreeStatus,
   receiptInForce,
+  resolveModelReasoningMetadata,
   runCodexCommandSync,
   serializeToolResultContent,
   splitToolUseId,
@@ -51,159 +63,177 @@ import {
   isProviderKind
 } from "./chunk-TASA6DTW.js";
 
-// src/codex/multi-agent.ts
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
-var CODEX_MULTI_AGENT_V2 = Object.freeze({
-  enabled: true,
-  max_concurrent_threads_per_session: 6,
-  expose_spawn_agent_model_overrides: true
-});
-function renderMultiAgentV2Feature() {
-  return "[features]\nmulti_agent_v2 = { enabled = true, max_concurrent_threads_per_session = 6, expose_spawn_agent_model_overrides = true }\n";
-}
-function probeText(value) {
-  if (!value || typeof value !== "object") return String(value ?? "");
-  const result = value;
-  return `${result.stdout ?? ""}
-${result.stderr ?? ""}`;
-}
-function supportsMultiAgentV2(binaryPath, run = (path, args, env) => runCodexCommandSync(path, args, { timeout: 1e4, env })) {
-  const probeHome = mkdtempSync(join(tmpdir(), "relay-codex-v2-probe-"));
-  try {
-    writeFileSync(join(probeHome, "config.toml"), renderMultiAgentV2Feature(), { encoding: "utf8", mode: 384 });
-    const env = { ...process.env, CODEX_HOME: probeHome };
-    let output = "";
-    try {
-      output = probeText(run(binaryPath, ["login", "status"], env));
-    } catch (error) {
-      output = probeText(error);
-    }
-    if (/ENOENT|not found|cannot find the file/i.test(output)) return false;
-    return !/error loading configuration|invalid configuration|unknown field/i.test(output);
-  } finally {
-    rmSync(probeHome, { recursive: true, force: true });
-  }
-}
+// src/core/pool-model.ts
+import { randomUUID as randomUUID2 } from "crypto";
 
-// src/codex/app-profile.ts
-var CODEX_APP_PROVIDER_ID = "relay-ai-launch-codex-app";
-var PREVIEW_PROXY_PORT = 54321;
-var CODEX_APP_AUTO_COMPACT_RATIO = 0.9;
-var CODEX_APP_THREAD_UNLOAD_DELAY_SECS = 48 * 60 * 60;
-function codexAppModelSlug(rawModelId) {
-  return rawModelId.startsWith("models/") ? rawModelId.slice("models/".length) : rawModelId;
+// src/pool/attempt.ts
+var MAX_POOL_ATTEMPTS = 8;
+var PoolAttemptError = class extends Error {
+  constructor(code, committed, cause) {
+    super(code);
+    this.code = code;
+    this.committed = committed;
+    this.cause = cause;
+  }
+  code;
+  committed;
+  cause;
+};
+function validPoolFinish(part) {
+  return part.type === "finish" && ["stop", "tool-calls", "length"].includes(part.finishReason ?? "");
 }
-function parseCodexAppModelSlug(modelKey) {
-  const prefix = `${CODEX_APP_PROVIDER_ID}/`;
-  return modelKey.startsWith(prefix) ? modelKey.slice(prefix.length) : modelKey;
+var PoolCoordinatorError = class extends Error {
+  /**
+   * True when the shared request budget ended the wait, not this member's own first-content or idle limit.
+   * The member never got its full allowance, so the timeout says nothing about its health.
+   */
+  constructor(message, budget = false) {
+    super(message);
+    this.budget = budget;
+  }
+  budget;
+};
+function meaningful(part) {
+  return ["text-delta", "reasoning-delta"].includes(part.type) && Boolean(part.text) || part.type === "tool-input-delta" && Boolean(part.delta) || part.type === "tool-input-start" || part.type === "tool-call";
 }
-function buildCodexAppRootConfig(spec) {
-  return {
-    model: codexAppModelSlug(spec.route.modelId),
-    model_provider: "openai",
-    openai_base_url: spec.proxyBaseUrl ?? `http://127.0.0.1:${spec.proxyPort}/v1`,
-    model_catalog_json: spec.catalogPath,
-    thread_unload_delay_secs: CODEX_APP_THREAD_UNLOAD_DELAY_SECS,
-    ...spec.multiAgentV2Enabled ? {
-      features: { multi_agent_v2: CODEX_MULTI_AGENT_V2 }
-    } : {}
+async function bounded(work, ms, signal, code, budget = false) {
+  signal.throwIfAborted();
+  if (ms <= 0) throw new PoolCoordinatorError(code, budget);
+  let timer;
+  let onAbort = () => {
   };
-}
-
-// src/codex/catalog.ts
-var DEFAULT_CONTEXT = 128e3;
-var CODEX_NO_REASONING_EFFORT = "none";
-function codexCatalogReasoningFields(npm, wireId, metadata) {
-  const reasoning = getReasoningCapabilities(npm, wireId, metadata);
-  if (reasoning.levels.length > 0) {
-    return {
-      supported_reasoning_levels: buildCodexReasoningLevels(reasoning),
-      default_reasoning_level: reasoning.defaultLevel,
-      supports_reasoning_summaries: reasoning.supportsSummaries,
-      default_reasoning_summary: reasoning.supportsSummaries ? "auto" : "none"
-    };
-  }
-  return {
-    supported_reasoning_levels: buildCodexReasoningLevels({
-      levels: [CODEX_NO_REASONING_EFFORT]
-    }),
-    default_reasoning_level: CODEX_NO_REASONING_EFFORT,
-    supports_reasoning_summaries: false,
-    default_reasoning_summary: "none"
-  };
-}
-function formatCodexModelLabel(model) {
-  const trimmed = model.name.trim();
-  if (trimmed && trimmed !== model.id) return trimmed;
-  const id = stripGoogleModelPrefix(model.id);
-  const claude = id.match(/^claude-([\w-]+?)-(\d+)-(\d+)(?:-\d{8})?$/);
-  if (claude) {
-    const tier = claude[1].split("-").map(
-      (part) => part.charAt(0).toUpperCase() + part.slice(1)
-    ).join(" ");
-    return `Claude ${tier} ${claude[2]}.${claude[3]}`;
-  }
-  const gpt = id.match(/^gpt-(\d+(?:\.\d+)?)(?:-([\w-]+))?$/i);
-  if (gpt) {
-    const suffix = gpt[2] ? ` ${gpt[2].split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")}` : "";
-    return `GPT-${gpt[1]}${suffix}`;
-  }
-  return id;
-}
-function catalogEntryFromModel(model, providerName, priority, appCatalog = false, slugOverride) {
-  const slug = slugOverride ?? (appCatalog ? codexAppModelSlug(model.id) : stripGoogleModelPrefix(model.id));
-  const context = model.contextWindow ?? DEFAULT_CONTEXT;
-  const label = formatCodexModelLabel(model);
-  const wireId = model.upstreamModelId ?? model.id;
-  const reasoningFields = codexCatalogReasoningFields(model.npm ?? "", wireId, {
-    apiBaseUrl: model.apiBaseUrl,
-    supportedParameters: model.supportedParameters,
-    reasoning: model.reasoning,
-    interleavedReasoningField: model.interleavedReasoningField,
-    reasoningEffortLevels: model.reasoningEffortLevels,
-    reasoningEffortConflict: model.reasoningEffortConflict
+  const interrupted = new Promise((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    timer = setTimeout(() => reject(new PoolCoordinatorError(code, budget)), Math.max(0, ms));
   });
-  return {
-    slug,
-    display_name: label,
-    ...reasoningFields,
-    shell_type: appCatalog ? "default" : "shell_command",
-    visibility: "list",
-    supported_in_api: true,
-    priority,
-    availability_nux: null,
-    upgrade: null,
-    base_instructions: "",
-    support_verbosity: false,
-    default_verbosity: null,
-    apply_patch_tool_type: null,
-    truncation_policy: appCatalog ? { mode: "bytes", limit: 1e4 } : { mode: "tokens", limit: context },
-    supports_parallel_tool_calls: !appCatalog,
-    experimental_supported_tools: [],
-    context_window: context,
-    max_context_window: context,
-    input_modalities: model.modalities ?? ["text", "image"],
-    description: `${label} \xB7 ${providerName}`
-  };
+  try {
+    return await Promise.race([work, interrupted]);
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", onAbort);
+  }
 }
-function buildCatalogFile(models, providerName) {
-  return {
-    models: models.map((m, i) => catalogEntryFromModel(m, providerName, i))
-  };
-}
-function buildAppCatalogFile(models, providerName, selectedModelId) {
-  const selected = models.find((m) => m.id === selectedModelId);
-  const rest = models.filter((m) => m.id !== selectedModelId);
-  const ordered = selected ? [selected, ...rest] : models;
-  return {
-    models: ordered.map((m, i) => catalogEntryFromModel(m, providerName, i, true))
-  };
-}
-function serializeCatalog(catalog) {
-  return `${JSON.stringify(catalog, null, 2)}
-`;
+async function* runPoolAttempts(routes, signal, limits, retryable, onAttempt = () => {
+}, onFailure = () => {
+}, onSkip = () => {
+}) {
+  for (const [name, value] of Object.entries(limits)) {
+    if (!Number.isSafeInteger(value) || value <= 0) throw new Error("Invalid pool limit: " + name);
+  }
+  const deadline = Date.now() + limits.totalMs;
+  let committed = false;
+  let lastError;
+  let opened = 0;
+  for (const route of routes) {
+    if (opened >= limits.attempts) break;
+    signal.throwIfAborted();
+    if (Date.now() >= deadline) throw new PoolAttemptError("total-deadline", committed);
+    if (route.admit) {
+      let reason;
+      try {
+        reason = await route.admit(signal);
+      } catch (error) {
+        if (signal.aborted) throw signal.reason ?? error;
+        reason = "could not be prepared: " + (error instanceof Error ? error.message : String(error));
+      }
+      if (reason) {
+        onSkip(route.id, reason);
+        continue;
+      }
+    }
+    opened += 1;
+    const controller = new AbortController();
+    const attemptSignal = AbortSignal.any([signal, controller.signal]);
+    const attemptStart = Date.now();
+    const firstDeadline = Math.min(deadline, attemptStart + limits.firstContentMs);
+    const firstBudget = deadline < attemptStart + limits.firstContentMs;
+    let iterator;
+    const buffered = [];
+    let bytes = 0;
+    let completed = false;
+    let consumerThrew = false;
+    let consumerError;
+    let terminalThrown = false;
+    onAttempt(route.id);
+    try {
+      const stream = await bounded(route.open(attemptSignal), firstDeadline - Date.now(), attemptSignal, "first-content-timeout", firstBudget);
+      iterator = stream[Symbol.asyncIterator]();
+      while (true) {
+        const now = Date.now();
+        const remaining = (committed ? Math.min(deadline, now + limits.idleMs) : firstDeadline) - now;
+        const budget = committed ? deadline < now + limits.idleMs : firstBudget;
+        const next = await bounded(iterator.next(), remaining, attemptSignal, committed ? "idle-or-total-timeout" : "first-content-timeout", budget);
+        signal.throwIfAborted();
+        if (next.done) throw new PoolCoordinatorError("missing-valid-finish");
+        const part = next.value;
+        if (part.type === "error") throw part.error ?? new Error("stream-error");
+        const terminal = part.type === "finish";
+        if (terminal && !validPoolFinish(part)) throw new PoolCoordinatorError("invalid-finish");
+        if (!committed) {
+          bytes += Buffer.byteLength(JSON.stringify(part));
+          if (bytes > limits.bufferBytes) throw new PoolCoordinatorError("provisional-buffer-limit");
+          buffered.push(part);
+          if (!meaningful(part) && !terminal) continue;
+          committed = true;
+          for (const pending of buffered) {
+            signal.throwIfAborted();
+            try {
+              yield pending;
+            } catch (error) {
+              consumerThrew = true;
+              consumerError = error;
+              throw error;
+            }
+          }
+          buffered.length = 0;
+        } else {
+          try {
+            yield part;
+          } catch (error) {
+            consumerThrew = true;
+            consumerError = error;
+            throw error;
+          }
+        }
+        if (terminal) {
+          completed = true;
+          return;
+        }
+      }
+    } catch (error) {
+      if (consumerThrew) {
+        terminalThrown = true;
+        throw consumerError;
+      }
+      lastError = error;
+      if (!signal.aborted) {
+        if (error instanceof PoolCoordinatorError && !error.budget) await route.recordAttemptFailure?.(error);
+        await onFailure(route.id, error, committed);
+      }
+      if (signal.aborted) {
+        terminalThrown = true;
+        throw signal.reason;
+      }
+      if (committed || !retryable(error)) {
+        terminalThrown = true;
+        throw new PoolAttemptError("attempt-failed", committed, error);
+      }
+    } finally {
+      controller.abort();
+      if (iterator?.return) {
+        try {
+          await bounded(iterator.return(), limits.cleanupMs, new AbortController().signal, "cleanup-timeout");
+        } catch {
+          if (!completed && !consumerThrew && !terminalThrown && !signal.aborted) {
+            throw new PoolAttemptError("cleanup-failed", committed, lastError);
+          }
+        }
+      }
+    }
+  }
+  if (opened === 0) throw new PoolAttemptError("no-admitted-route", false, lastError);
+  throw new PoolAttemptError("attempt-budget-exhausted", committed, lastError);
 }
 
 // src/pool/codex-retry.ts
@@ -1469,6 +1499,15 @@ var DEFAULT_LIMITS2 = {
   maxItems: 2e3,
   maxTotalBytes: 128 * 1024 * 1024
 };
+function withoutImageData(value) {
+  if (Array.isArray(value)) return value.map(withoutImageData);
+  if (value === null || typeof value !== "object") return value;
+  const record = value;
+  if (record.type === "input_image" && typeof record.image_url === "string") {
+    return { ...record, image_url: "[image]" };
+  }
+  return Object.fromEntries(Object.entries(record).map(([key, item]) => [key, withoutImageData(item)]));
+}
 function items(input) {
   if (typeof input === "string") return [{ type: "message", role: "user", content: input }];
   if (!Array.isArray(input)) throw new Error("unsupported-input");
@@ -1506,7 +1545,7 @@ var PoolContinuationStore = class {
       expires: this.now() + this.limits.ttlMs,
       bytes: 0
     };
-    state.bytes = Buffer.byteLength(JSON.stringify(state), "utf8");
+    state.bytes = Buffer.byteLength(JSON.stringify(withoutImageData(state)), "utf8");
     if (state.bytes > this.limits.maxBytes) throw new Error("continuation-history-too-large");
     this.prune();
     const key = JSON.stringify([scope, responseId]);
@@ -1574,12 +1613,25 @@ function stripRouteParts(part, target, source, origins) {
   const { providerOptions: _options, toolCallId: _id, ...rest } = part;
   return { ...rest, ...rawId ? { toolCallId: rawId } : {} };
 }
+function isOpaqueCompaction(item) {
+  return (item.type === "compaction" || item.type === "context_compaction") && decodeCompactionContent(item.encrypted_content) === null;
+}
+function hasReasoningSummary(item) {
+  return Array.isArray(item.summary) && item.summary.some((part) => part && typeof part === "object" && typeof part.text === "string" && part.text.trim().length > 0);
+}
 function preparePoolHistory(body, source, target, npm, metadata, options, origins) {
   const fresh = structuredClone(body);
-  const input = items(fresh.input);
-  if (input.some(
-    (item) => (item.type === "compaction" || item.type === "context_compaction") && decodeCompactionContent(item.encrypted_content) === null || item.type === "reasoning" && typeof item.encrypted_content === "string"
-  )) throw new Error("unsupported-continuation: opaque provider state requires original route");
+  const rawInput = items(fresh.input);
+  const hadOpaque = rawInput.some((item) => isOpaqueCompaction(item) || item.type === "reasoning" && typeof item.encrypted_content === "string");
+  const input = rawInput.filter((item) => !isOpaqueCompaction(item)).map((item) => {
+    if (item.type !== "reasoning" || typeof item.encrypted_content !== "string") return item;
+    const { encrypted_content: _encrypted, ...rest } = item;
+    return rest;
+  });
+  const hasReadableHistory = input.some((item) => item.type !== "reasoning" || hasReasoningSummary(item));
+  if (hadOpaque && !hasReadableHistory) {
+    throw new Error("unsupported-continuation: opaque provider state requires original route");
+  }
   fresh.input = input;
   const params = translateResponsesRequest(fresh, npm, metadata, options);
   const targetKey = poolRouteKey(target);
@@ -1621,178 +1673,6 @@ function lazyPoolRoute(evidence, prepare, extra) {
 
 // src/pool/sdk-route.ts
 import { streamText as streamText2 } from "ai";
-
-// src/pool/attempt.ts
-var MAX_POOL_ATTEMPTS = 8;
-var PoolAttemptError = class extends Error {
-  constructor(code, committed, cause) {
-    super(code);
-    this.code = code;
-    this.committed = committed;
-    this.cause = cause;
-  }
-  code;
-  committed;
-  cause;
-};
-function validPoolFinish(part) {
-  return part.type === "finish" && ["stop", "tool-calls", "length"].includes(part.finishReason ?? "");
-}
-var PoolCoordinatorError = class extends Error {
-  /**
-   * True when the shared request budget ended the wait, not this member's own first-content or idle limit.
-   * The member never got its full allowance, so the timeout says nothing about its health.
-   */
-  constructor(message, budget = false) {
-    super(message);
-    this.budget = budget;
-  }
-  budget;
-};
-function meaningful(part) {
-  return ["text-delta", "reasoning-delta"].includes(part.type) && Boolean(part.text) || part.type === "tool-input-delta" && Boolean(part.delta) || part.type === "tool-input-start" || part.type === "tool-call";
-}
-async function bounded(work, ms, signal, code, budget = false) {
-  signal.throwIfAborted();
-  if (ms <= 0) throw new PoolCoordinatorError(code, budget);
-  let timer;
-  let onAbort = () => {
-  };
-  const interrupted = new Promise((_, reject) => {
-    onAbort = () => reject(signal.reason);
-    signal.addEventListener("abort", onAbort, { once: true });
-    timer = setTimeout(() => reject(new PoolCoordinatorError(code, budget)), Math.max(0, ms));
-  });
-  try {
-    return await Promise.race([work, interrupted]);
-  } finally {
-    clearTimeout(timer);
-    signal.removeEventListener("abort", onAbort);
-  }
-}
-async function* runPoolAttempts(routes, signal, limits, retryable, onAttempt = () => {
-}, onFailure = () => {
-}, onSkip = () => {
-}) {
-  for (const [name, value] of Object.entries(limits)) {
-    if (!Number.isSafeInteger(value) || value <= 0) throw new Error("Invalid pool limit: " + name);
-  }
-  const deadline = Date.now() + limits.totalMs;
-  let committed = false;
-  let lastError;
-  let opened = 0;
-  for (const route of routes) {
-    if (opened >= limits.attempts) break;
-    signal.throwIfAborted();
-    if (Date.now() >= deadline) throw new PoolAttemptError("total-deadline", committed);
-    if (route.admit) {
-      let reason;
-      try {
-        reason = await route.admit(signal);
-      } catch (error) {
-        if (signal.aborted) throw signal.reason ?? error;
-        reason = "could not be prepared: " + (error instanceof Error ? error.message : String(error));
-      }
-      if (reason) {
-        onSkip(route.id, reason);
-        continue;
-      }
-    }
-    opened += 1;
-    const controller = new AbortController();
-    const attemptSignal = AbortSignal.any([signal, controller.signal]);
-    const attemptStart = Date.now();
-    const firstDeadline = Math.min(deadline, attemptStart + limits.firstContentMs);
-    const firstBudget = deadline < attemptStart + limits.firstContentMs;
-    let iterator;
-    const buffered = [];
-    let bytes = 0;
-    let completed = false;
-    let consumerThrew = false;
-    let consumerError;
-    let terminalThrown = false;
-    onAttempt(route.id);
-    try {
-      const stream = await bounded(route.open(attemptSignal), firstDeadline - Date.now(), attemptSignal, "first-content-timeout", firstBudget);
-      iterator = stream[Symbol.asyncIterator]();
-      while (true) {
-        const now = Date.now();
-        const remaining = (committed ? Math.min(deadline, now + limits.idleMs) : firstDeadline) - now;
-        const budget = committed ? deadline < now + limits.idleMs : firstBudget;
-        const next = await bounded(iterator.next(), remaining, attemptSignal, committed ? "idle-or-total-timeout" : "first-content-timeout", budget);
-        signal.throwIfAborted();
-        if (next.done) throw new PoolCoordinatorError("missing-valid-finish");
-        const part = next.value;
-        if (part.type === "error") throw part.error ?? new Error("stream-error");
-        const terminal = part.type === "finish";
-        if (terminal && !validPoolFinish(part)) throw new PoolCoordinatorError("invalid-finish");
-        if (!committed) {
-          bytes += Buffer.byteLength(JSON.stringify(part));
-          if (bytes > limits.bufferBytes) throw new PoolCoordinatorError("provisional-buffer-limit");
-          buffered.push(part);
-          if (!meaningful(part) && !terminal) continue;
-          committed = true;
-          for (const pending of buffered) {
-            signal.throwIfAborted();
-            try {
-              yield pending;
-            } catch (error) {
-              consumerThrew = true;
-              consumerError = error;
-              throw error;
-            }
-          }
-          buffered.length = 0;
-        } else {
-          try {
-            yield part;
-          } catch (error) {
-            consumerThrew = true;
-            consumerError = error;
-            throw error;
-          }
-        }
-        if (terminal) {
-          completed = true;
-          return;
-        }
-      }
-    } catch (error) {
-      if (consumerThrew) {
-        terminalThrown = true;
-        throw consumerError;
-      }
-      lastError = error;
-      if (!signal.aborted) {
-        if (error instanceof PoolCoordinatorError && !error.budget) await route.recordAttemptFailure?.(error);
-        await onFailure(route.id, error, committed);
-      }
-      if (signal.aborted) {
-        terminalThrown = true;
-        throw signal.reason;
-      }
-      if (committed || !retryable(error)) {
-        terminalThrown = true;
-        throw new PoolAttemptError("attempt-failed", committed, error);
-      }
-    } finally {
-      controller.abort();
-      if (iterator?.return) {
-        try {
-          await bounded(iterator.return(), limits.cleanupMs, new AbortController().signal, "cleanup-timeout");
-        } catch {
-          if (!completed && !consumerThrew && !terminalThrown && !signal.aborted) {
-            throw new PoolAttemptError("cleanup-failed", committed, lastError);
-          }
-        }
-      }
-    }
-  }
-  if (opened === 0) throw new PoolAttemptError("no-admitted-route", false, lastError);
-  throw new PoolAttemptError("attempt-budget-exhausted", committed, lastError);
-}
-
-// src/pool/sdk-route.ts
 function sdkPoolRoute(evidence, model, request, health) {
   if (!Number.isSafeInteger(request.maxOutputTokens) || request.maxOutputTokens <= 0) {
     throw new Error("Pool requests require a bounded output reservation");
@@ -1987,76 +1867,81 @@ async function prepareCodexPoolRoutes(options) {
         skip(reason);
         return { skip: reason };
       };
-      const requested = options.body.reasoning?.effort ?? options.pool.effort;
-      const auto = requested === "auto";
-      const memberEffort = poolMemberEffort(auto ? "auto" : requested, receipt);
-      const memberAuto = memberEffort === null;
-      const body = omitPoolEffort(options.body, memberEffort);
-      const translate = options.translate ?? preparePoolHistory;
-      const params = translate(body, options.source, identity, npm, {
-        ...model,
-        providerId: provider.id,
-        apiBaseUrl: model.apiBaseUrl
-      }, { maxTools: POOL_MAX_TOOLS, npm, forwardToolChoice: true }, poolHistoryOrigins(options.body));
-      if (memberAuto && translatedEffortClaim(params.providerOptions)) {
-        return gone("translation would set an effort");
+      try {
+        const requested = options.body.reasoning?.effort ?? options.pool.effort;
+        const auto = requested === "auto";
+        const memberEffort = poolMemberEffort(auto ? "auto" : requested, receipt);
+        const memberAuto = memberEffort === null;
+        const body = omitPoolEffort(options.body, memberEffort);
+        const translate = options.translate ?? preparePoolHistory;
+        const params = translate(body, options.source, identity, npm, {
+          ...model,
+          providerId: provider.id,
+          apiBaseUrl: model.apiBaseUrl
+        }, { maxTools: POOL_MAX_TOOLS, npm, forwardToolChoice: true }, poolHistoryOrigins(options.body));
+        if (memberAuto && translatedEffortClaim(params.providerOptions)) {
+          return gone("translation would set an effort");
+        }
+        if (compaction) Object.assign(params, appendCompactionInstruction(params), { toolChoice: void 0 });
+        const outputCap = poolOutputCap(provider.id, model.id, receipt.contextWindow);
+        const askedOutput = typeof body.max_output_tokens === "number" ? body.max_output_tokens : outputCap;
+        if (!Number.isSafeInteger(askedOutput) || askedOutput <= 0) {
+          return gone("invalid output limit");
+        }
+        params.maxOutputTokens = Math.min(askedOutput, outputCap, compaction ? POOL_COMPACTION_MAX_OUTPUT_TOKENS : Infinity);
+        const context = await (options.checkContext ?? defaultContextCheck)(params, receipt);
+        if (!context.verified || !context.fits) {
+          return gone(context.verified ? "request too large for its context window" : "context window not verified");
+        }
+        const scopes = [poolEndpointScope(provider.id, revision, model.id)];
+        const accountScopes = [poolAccountScope(provider.id)];
+        const off = await options.health.disabledFor(scopes);
+        if (off) {
+          return gone("DISABLED: " + off.note + " (run Test to re-enable)");
+        }
+        const unavailableUntil = await options.health.cooldownFor({ id: revision, scopes: [...scopes, ...accountScopes] });
+        if (unavailableUntil !== void 0 && unavailableUntil > Date.now()) {
+          return gone("cooling down after a failure");
+        }
+        const apiKey = await resolveLocalProviderApiKey(provider);
+        if (apiKey === null || apiKey === void 0) {
+          return gone("no credential");
+        }
+        const languageModel = await createLanguageModel({
+          npm,
+          modelId: model.upstreamModelId,
+          apiKey,
+          baseURL: model.apiBaseUrl,
+          providerId: provider.id,
+          authType: provider.authType,
+          oauthAccountId: provider.oauthAccountId,
+          providerData: provider.providerData,
+          headers: poolProviderHeaders(provider, model, options.sessionId),
+          sessionId: options.sessionId,
+          refreshToken: providerRefreshToken(provider.id, provider.authType, provider.authRef)
+        });
+        const { toolContext: _toolContext, instructions, ...sdkParams } = params;
+        const dispatch = sdkPoolRoute({
+          member,
+          revision,
+          freeStatus,
+          catalogVerified: true,
+          accessVerified: true,
+          billingSafe: receipt.billingSafe,
+          targets: receipt.targets,
+          toolsVerified: receipt.tools,
+          // Auto is constructively verified: Relay omits the field and any translator
+          // claim is refused above, so no named default rung is required.
+          defaultEffortVerified: true,
+          effortLevels: receipt.effortLevels,
+          contextFits: true,
+          contextVerified: true
+        }, languageModel, { ...sdkParams, system: instructions, maxOutputTokens: params.maxOutputTokens }, { store: options.health, scopes, accountScopes });
+        return { route: dispatch, attach: { toolContext: params.toolContext } };
+      } catch (error) {
+        if (options.signal.aborted) throw options.signal.reason ?? error;
+        return gone("could not be prepared: " + (error instanceof Error ? error.message : String(error)));
       }
-      if (compaction) Object.assign(params, appendCompactionInstruction(params), { toolChoice: void 0 });
-      const outputCap = poolOutputCap(provider.id, model.id, receipt.contextWindow);
-      const askedOutput = typeof body.max_output_tokens === "number" ? body.max_output_tokens : outputCap;
-      if (!Number.isSafeInteger(askedOutput) || askedOutput <= 0) {
-        return gone("invalid output limit");
-      }
-      params.maxOutputTokens = Math.min(askedOutput, outputCap, compaction ? POOL_COMPACTION_MAX_OUTPUT_TOKENS : Infinity);
-      const context = await (options.checkContext ?? defaultContextCheck)(params, receipt);
-      if (!context.verified || !context.fits) {
-        return gone(context.verified ? "request too large for its context window" : "context window not verified");
-      }
-      const scopes = [poolEndpointScope(provider.id, revision, model.id)];
-      const accountScopes = [poolAccountScope(provider.id)];
-      const off = await options.health.disabledFor(scopes);
-      if (off) {
-        return gone("DISABLED: " + off.note + " (run Test to re-enable)");
-      }
-      const unavailableUntil = await options.health.cooldownFor({ id: revision, scopes: [...scopes, ...accountScopes] });
-      if (unavailableUntil !== void 0 && unavailableUntil > Date.now()) {
-        return gone("cooling down after a failure");
-      }
-      const apiKey = await resolveLocalProviderApiKey(provider);
-      if (apiKey === null || apiKey === void 0) {
-        return gone("no credential");
-      }
-      const languageModel = await createLanguageModel({
-        npm,
-        modelId: model.upstreamModelId,
-        apiKey,
-        baseURL: model.apiBaseUrl,
-        providerId: provider.id,
-        authType: provider.authType,
-        oauthAccountId: provider.oauthAccountId,
-        providerData: provider.providerData,
-        headers: poolProviderHeaders(provider, model, options.sessionId),
-        sessionId: options.sessionId,
-        refreshToken: providerRefreshToken(provider.id, provider.authType, provider.authRef)
-      });
-      const { toolContext: _toolContext, instructions, ...sdkParams } = params;
-      const dispatch = sdkPoolRoute({
-        member,
-        revision,
-        freeStatus,
-        catalogVerified: true,
-        accessVerified: true,
-        billingSafe: receipt.billingSafe,
-        targets: receipt.targets,
-        toolsVerified: receipt.tools,
-        // Auto is constructively verified: Relay omits the field and any translator
-        // claim is refused above, so no named default rung is required.
-        defaultEffortVerified: true,
-        effortLevels: receipt.effortLevels,
-        contextFits: true,
-        contextVerified: true
-      }, languageModel, { ...sdkParams, system: instructions, maxOutputTokens: params.maxOutputTokens }, { store: options.health, scopes, accountScopes });
-      return { route: dispatch, attach: { toolContext: params.toolContext } };
     }, { identity }));
   }
   return routes;
@@ -2394,6 +2279,161 @@ var CodexPoolRuntime = class {
   }
 };
 
+// src/codex/multi-agent.ts
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+var CODEX_MULTI_AGENT_V2 = Object.freeze({
+  enabled: true,
+  max_concurrent_threads_per_session: 6,
+  expose_spawn_agent_model_overrides: true
+});
+function renderMultiAgentV2Feature() {
+  return "[features]\nmulti_agent_v2 = { enabled = true, max_concurrent_threads_per_session = 6, expose_spawn_agent_model_overrides = true }\n";
+}
+function probeText(value) {
+  if (!value || typeof value !== "object") return String(value ?? "");
+  const result = value;
+  return `${result.stdout ?? ""}
+${result.stderr ?? ""}`;
+}
+function supportsMultiAgentV2(binaryPath, run = (path, args, env) => runCodexCommandSync(path, args, { timeout: 1e4, env })) {
+  const probeHome = mkdtempSync(join(tmpdir(), "relay-codex-v2-probe-"));
+  try {
+    writeFileSync(join(probeHome, "config.toml"), renderMultiAgentV2Feature(), { encoding: "utf8", mode: 384 });
+    const env = { ...process.env, CODEX_HOME: probeHome };
+    let output = "";
+    try {
+      output = probeText(run(binaryPath, ["login", "status"], env));
+    } catch (error) {
+      output = probeText(error);
+    }
+    if (/ENOENT|not found|cannot find the file/i.test(output)) return false;
+    return !/error loading configuration|invalid configuration|unknown field/i.test(output);
+  } finally {
+    rmSync(probeHome, { recursive: true, force: true });
+  }
+}
+
+// src/codex/app-profile.ts
+var CODEX_APP_PROVIDER_ID = "relay-ai-launch-codex-app";
+var PREVIEW_PROXY_PORT = 54321;
+var CODEX_APP_AUTO_COMPACT_RATIO = 0.9;
+var CODEX_APP_THREAD_UNLOAD_DELAY_SECS = 48 * 60 * 60;
+function codexAppModelSlug(rawModelId) {
+  return rawModelId.startsWith("models/") ? rawModelId.slice("models/".length) : rawModelId;
+}
+function parseCodexAppModelSlug(modelKey) {
+  const prefix = `${CODEX_APP_PROVIDER_ID}/`;
+  return modelKey.startsWith(prefix) ? modelKey.slice(prefix.length) : modelKey;
+}
+function buildCodexAppRootConfig(spec) {
+  return {
+    model: codexAppModelSlug(spec.route.modelId),
+    model_provider: "openai",
+    openai_base_url: spec.proxyBaseUrl ?? `http://127.0.0.1:${spec.proxyPort}/v1`,
+    model_catalog_json: spec.catalogPath,
+    thread_unload_delay_secs: CODEX_APP_THREAD_UNLOAD_DELAY_SECS,
+    ...spec.multiAgentV2Enabled ? {
+      features: { multi_agent_v2: CODEX_MULTI_AGENT_V2 }
+    } : {}
+  };
+}
+
+// src/codex/catalog.ts
+var DEFAULT_CONTEXT = 128e3;
+var CODEX_NO_REASONING_EFFORT = "none";
+function codexCatalogReasoningFields(npm, wireId, metadata) {
+  const reasoning = getReasoningCapabilities(npm, wireId, metadata);
+  if (reasoning.levels.length > 0) {
+    return {
+      supported_reasoning_levels: buildCodexReasoningLevels(reasoning),
+      default_reasoning_level: reasoning.defaultLevel,
+      supports_reasoning_summaries: reasoning.supportsSummaries,
+      default_reasoning_summary: reasoning.supportsSummaries ? "auto" : "none"
+    };
+  }
+  return {
+    supported_reasoning_levels: buildCodexReasoningLevels({
+      levels: [CODEX_NO_REASONING_EFFORT]
+    }),
+    default_reasoning_level: CODEX_NO_REASONING_EFFORT,
+    supports_reasoning_summaries: false,
+    default_reasoning_summary: "none"
+  };
+}
+function formatCodexModelLabel(model) {
+  const trimmed = model.name.trim();
+  if (trimmed && trimmed !== model.id) return trimmed;
+  const id = stripGoogleModelPrefix(model.id);
+  const claude = id.match(/^claude-([\w-]+?)-(\d+)-(\d+)(?:-\d{8})?$/);
+  if (claude) {
+    const tier = claude[1].split("-").map(
+      (part) => part.charAt(0).toUpperCase() + part.slice(1)
+    ).join(" ");
+    return `Claude ${tier} ${claude[2]}.${claude[3]}`;
+  }
+  const gpt = id.match(/^gpt-(\d+(?:\.\d+)?)(?:-([\w-]+))?$/i);
+  if (gpt) {
+    const suffix = gpt[2] ? ` ${gpt[2].split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")}` : "";
+    return `GPT-${gpt[1]}${suffix}`;
+  }
+  return id;
+}
+function catalogEntryFromModel(model, providerName, priority, appCatalog = false, slugOverride) {
+  const slug = slugOverride ?? (appCatalog ? codexAppModelSlug(model.id) : stripGoogleModelPrefix(model.id));
+  const context = model.contextWindow ?? DEFAULT_CONTEXT;
+  const label = formatCodexModelLabel(model);
+  const wireId = model.upstreamModelId ?? model.id;
+  const reasoningFields = codexCatalogReasoningFields(model.npm ?? "", wireId, {
+    apiBaseUrl: model.apiBaseUrl,
+    supportedParameters: model.supportedParameters,
+    reasoning: model.reasoning,
+    interleavedReasoningField: model.interleavedReasoningField,
+    reasoningEffortLevels: model.reasoningEffortLevels,
+    reasoningEffortConflict: model.reasoningEffortConflict
+  });
+  return {
+    slug,
+    display_name: label,
+    ...reasoningFields,
+    shell_type: appCatalog ? "default" : "shell_command",
+    visibility: "list",
+    supported_in_api: true,
+    priority,
+    availability_nux: null,
+    upgrade: null,
+    base_instructions: "",
+    support_verbosity: false,
+    default_verbosity: null,
+    apply_patch_tool_type: null,
+    truncation_policy: appCatalog ? { mode: "bytes", limit: 1e4 } : { mode: "tokens", limit: context },
+    supports_parallel_tool_calls: !appCatalog,
+    experimental_supported_tools: [],
+    context_window: context,
+    max_context_window: context,
+    input_modalities: model.modalities ?? ["text", "image"],
+    description: `${label} \xB7 ${providerName}`
+  };
+}
+function buildCatalogFile(models, providerName) {
+  return {
+    models: models.map((m, i) => catalogEntryFromModel(m, providerName, i))
+  };
+}
+function buildAppCatalogFile(models, providerName, selectedModelId) {
+  const selected = models.find((m) => m.id === selectedModelId);
+  const rest = models.filter((m) => m.id !== selectedModelId);
+  const ordered = selected ? [selected, ...rest] : models;
+  return {
+    models: ordered.map((m, i) => catalogEntryFromModel(m, providerName, i, true))
+  };
+}
+function serializeCatalog(catalog) {
+  return `${JSON.stringify(catalog, null, 2)}
+`;
+}
+
 // src/pool/catalog.ts
 var ALIASES = {
   codex: FREE_POOL_MODEL_ID,
@@ -2455,6 +2495,633 @@ function codexPoolCatalogModel(pool, receipts, options = {}) {
   };
 }
 
+// src/core/errors.ts
+var DEFAULT_RETRYABLE = {
+  INVALID_ROUTE_ID: false,
+  ROUTE_NOT_FOUND: false,
+  PROVIDER_DISABLED: false,
+  CREDENTIAL_UNAVAILABLE: false,
+  OAUTH_REFRESH_FAILED: true,
+  UNSUPPORTED_MODEL: false,
+  UNSUPPORTED_REASONING_LEVEL: false,
+  UNSUPPORTED_REGISTRY_VERSION: false,
+  PROVIDER_LOAD_FAILED: true
+};
+var RelayCoreError = class extends Error {
+  code;
+  retryable;
+  providerId;
+  routeId;
+  constructor(code, message, options = {}) {
+    super(message, options.cause !== void 0 ? { cause: options.cause } : void 0);
+    this.name = "RelayCoreError";
+    this.code = code;
+    this.retryable = options.retryable ?? DEFAULT_RETRYABLE[code];
+    if (options.providerId !== void 0) this.providerId = options.providerId;
+    if (options.routeId !== void 0) this.routeId = options.routeId;
+  }
+  toJSON() {
+    return {
+      name: this.name,
+      code: this.code,
+      message: this.message,
+      retryable: this.retryable,
+      ...this.providerId !== void 0 ? { providerId: this.providerId } : {},
+      ...this.routeId !== void 0 ? { routeId: this.routeId } : {}
+    };
+  }
+};
+function isRelayCoreError(err) {
+  return err instanceof RelayCoreError;
+}
+
+// src/core/reasoning.ts
+var RELAY_REASONING_LEVELS = [
+  "off",
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max"
+];
+function isRelayReasoningLevel(value) {
+  return typeof value === "string" && RELAY_REASONING_LEVELS.includes(value);
+}
+function reasoningNpmForRoute(provider, model) {
+  if (model.modelFormat === "cloud-code") return "@ai-sdk/google";
+  return model.npm ?? provider.api.npm ?? "";
+}
+function resolveReasoningProviderOptions(level, provider, model, routeId) {
+  if (!isRelayReasoningLevel(level)) {
+    throw new RelayCoreError(
+      "UNSUPPORTED_REASONING_LEVEL",
+      `Unknown reasoning level "${String(level)}" \u2014 expected one of: ${RELAY_REASONING_LEVELS.join(", ")}.`,
+      { providerId: provider.id, routeId }
+    );
+  }
+  const npm = reasoningNpmForRoute(provider, model);
+  const upstreamModelId = model.upstreamModelId ?? model.id;
+  const metadata = {
+    providerId: provider.id,
+    upstreamModelId,
+    ...model.apiUrl ?? provider.api.url ? { apiBaseUrl: model.apiUrl ?? provider.api.url } : {},
+    ...model.supportedParameters ? { supportedParameters: model.supportedParameters } : {},
+    // Shared with the Codex materializer so Core can't diverge on reasoning/
+    // interleaved/effort. Effort resolves on the catalog id (models.dev's key).
+    ...resolveModelReasoningMetadata(provider.id, model.id, {
+      reasoning: model.reasoning,
+      interleavedField: model.interleavedReasoningField
+    })
+  };
+  const caps = getReasoningCapabilities(npm, upstreamModelId, metadata);
+  if (caps.mode !== "controllable" || !caps.levels.includes(level)) {
+    const available = caps.levels.length > 0 ? caps.levels.join(", ") : "none";
+    throw new RelayCoreError(
+      "UNSUPPORTED_REASONING_LEVEL",
+      `Model "${model.id}" on provider "${provider.name}" does not support reasoning level "${level}" \u2014 available levels: ${available}. See capabilities.reasoningLevels from listRelayModels().`,
+      { providerId: provider.id, routeId }
+    );
+  }
+  const resolved = effortProviderOptions(npm, level, upstreamModelId, metadata);
+  if (!resolved) {
+    throw new RelayCoreError(
+      "UNSUPPORTED_REASONING_LEVEL",
+      `Model "${model.id}" on provider "${provider.name}" advertises reasoning level "${level}" but Relay has no request mapping for it \u2014 this is a relay-ai bug, please report it.`,
+      { providerId: provider.id, routeId }
+    );
+  }
+  return resolved;
+}
+async function withReasoningProviderOptions(model, providerOptions) {
+  const { wrapLanguageModel } = await import("ai");
+  return wrapLanguageModel({
+    // `LanguageModel` also admits a bare model-id string and the legacy v2
+    // interface; everything Core builds is a concrete current-spec model.
+    model,
+    middleware: {
+      specificationVersion: "v4",
+      transformParams: async ({ params }) => ({
+        ...params,
+        providerOptions: deepMergeProviderOptions(
+          providerOptions,
+          params.providerOptions
+        )
+      })
+    }
+  });
+}
+async function withRequestHeaders(model, headers) {
+  const { wrapLanguageModel } = await import("ai");
+  return wrapLanguageModel({
+    model,
+    middleware: {
+      specificationVersion: "v4",
+      transformParams: async ({ params }) => ({
+        ...params,
+        headers: mergeHeaders(
+          headers,
+          params.headers
+        )
+      })
+    }
+  });
+}
+
+// src/core/route-id.ts
+var SEPARATOR = "::";
+function parseRelayRouteId(routeId) {
+  const idx = typeof routeId === "string" ? routeId.indexOf(SEPARATOR) : -1;
+  if (idx <= 0 || idx === routeId.length - SEPARATOR.length) {
+    throw new RelayCoreError("INVALID_ROUTE_ID", `Route id must be "provider::model", got: ${JSON.stringify(routeId)}`);
+  }
+  const providerId = routeId.slice(0, idx);
+  const modelId = routeId.slice(idx + SEPARATOR.length);
+  if (!isValidProviderId(providerId)) {
+    throw new RelayCoreError("INVALID_ROUTE_ID", `Invalid provider id in route id: ${JSON.stringify(routeId)}`);
+  }
+  return { providerId, modelId };
+}
+
+// src/core/catalog.ts
+function loadCoreRegistry(path) {
+  const registry = loadRegistry(path, { persist: false });
+  if (registry.schemaVersion > REGISTRY_SCHEMA_VERSION) {
+    throw new RelayCoreError(
+      "UNSUPPORTED_REGISTRY_VERSION",
+      `Registry schema v${registry.schemaVersion} is newer than supported v${REGISTRY_SCHEMA_VERSION} \u2014 upgrade relay-ai.`
+    );
+  }
+  return registry;
+}
+
+// src/core/pool-model.ts
+var RELAY_POOL_PROVIDER_ID = "relay-free-pool";
+var RELAY_POOL_MODEL_ID = "relay-free-pool";
+var RELAY_POOL_ROUTE_ID = `${RELAY_POOL_PROVIDER_ID}::${RELAY_POOL_MODEL_ID}`;
+var ORIGIN_NAMESPACE = "relay-pool";
+var RAW = /* @__PURE__ */ Symbol("relay-pool-raw-part");
+var NO_CREDENTIAL_NEEDED = () => "relay-core-pool";
+function loadPoolState(registryPath, copilotData) {
+  let pool;
+  try {
+    pool = parseFreePool(loadPreferences().freePool);
+  } catch {
+    return void 0;
+  }
+  if (pool.enabled !== true || pool.members.length === 0) return void 0;
+  const ids = new Set(pool.members.map((member) => member.providerId));
+  const registry = loadCoreRegistry(registryPath);
+  const trimmed = {
+    ...registry,
+    providers: registry.providers.filter((provider) => ids.has(provider.id)).map((provider) => {
+      if (!copilotData?.has(provider.id) || !provider.modelsCache) return provider;
+      return { ...provider, modelsCache: {
+        ...provider.modelsCache,
+        models: filterCachedCopilotModels(provider.modelsCache.models, copilotPlanTier(copilotData.get(provider.id)))
+      } };
+    })
+  };
+  return { pool, providers: materializeRegistry(trimmed, NO_CREDENTIAL_NEEDED, { agent: "codex" }) };
+}
+async function loadPoolStateForCall() {
+  const first = loadPoolState();
+  if (!first) return void 0;
+  const copilot = first.pool.members.filter((member) => isProviderKind(member.providerId, "github-copilot"));
+  if (copilot.length === 0) return first;
+  const registry = loadCoreRegistry();
+  const data = /* @__PURE__ */ new Map();
+  for (const member of copilot) {
+    const provider = registry.providers.find((item) => item.id === member.providerId);
+    if (!provider || data.has(provider.id)) continue;
+    try {
+      data.set(provider.id, await resolveProviderOAuthProviderData(provider.authRef));
+    } catch {
+      data.set(provider.id, void 0);
+    }
+  }
+  return loadPoolState(void 0, data);
+}
+function servableMembers(state, now, planKnown = true) {
+  const found = [];
+  for (const member of state.pool.members) {
+    const provider = state.providers.find((item) => item.id === member.providerId);
+    const model = provider?.models.find((item) => item.id === member.modelId);
+    if (!provider || !model || !model.npm || model.modelFormat === "cloud-code") continue;
+    const planPending = !planKnown && isProviderKind(provider.id, "github-copilot");
+    if (!planPending && poolFreeStatus({ model, providerId: provider.id }) !== "verified_free") continue;
+    if (!planPending && poolRoutingProblem(provider, model)) continue;
+    const revision = poolEndpointRevision({
+      providerId: provider.id,
+      authRef: provider.authRef,
+      npm: model.npm,
+      baseURL: model.apiBaseUrl,
+      upstreamModelId: model.upstreamModelId,
+      headers: provider.headers
+    });
+    const receipt = currentPoolReceipt(state.pool.receipts, member, revision, now);
+    if (!receipt || !receipt.billingSafe || !receipt.targets.includes("core")) continue;
+    found.push({ member, provider, model, revision, receipt, routeId: `${provider.id}::${model.id}` });
+  }
+  return found;
+}
+function commonEffortLevels(members) {
+  if (!members.length) return [];
+  return members[0].receipt.effortLevels.filter((level) => members.every((item) => item.receipt.effortLevels.includes(level))).filter(isRelayReasoningLevel);
+}
+function relayPoolDescriptor(now = Date.now(), registryPath) {
+  const state = loadPoolState(registryPath);
+  if (!state) return void 0;
+  const members = servableMembers(state, now, false);
+  const entry = members.length ? poolCatalogEntry(state.pool, state.pool.receipts, "core", now) : void 0;
+  if (!entry) return void 0;
+  const levels = commonEffortLevels(members);
+  return {
+    routeId: RELAY_POOL_ROUTE_ID,
+    providerId: RELAY_POOL_PROVIDER_ID,
+    providerName: "Relay Free Pool",
+    providerShortName: "Free Pool",
+    modelId: RELAY_POOL_MODEL_ID,
+    upstreamModelId: RELAY_POOL_MODEL_ID,
+    displayName: "Relay Free Pool",
+    authType: "none",
+    favorite: false,
+    contextWindow: entry.context_window,
+    pricing: { input: 0, output: 0 },
+    capabilities: {
+      tools: "unknown",
+      vision: "unknown",
+      reasoning: levels.length ? "adjustable" : "unknown",
+      ...levels.length ? { reasoningLevels: levels } : {}
+    }
+  };
+}
+function tagPart(part, key) {
+  if (!part.providerMetadata || Object.keys(part.providerMetadata).length === 0) return part;
+  return { ...part, providerMetadata: { ...part.providerMetadata, [ORIGIN_NAMESPACE]: { route: key } } };
+}
+function isolateHistory(prompt, key) {
+  return prompt.map((message) => {
+    if (message.role !== "assistant" || !Array.isArray(message.content)) return message;
+    return {
+      ...message,
+      content: message.content.map((part) => {
+        const options = part.providerOptions;
+        if (!options) return part;
+        const { providerOptions: _drop, ...clean } = part;
+        const origin = options[ORIGIN_NAMESPACE]?.route;
+        if (origin !== key) return clean;
+        const { [ORIGIN_NAMESPACE]: _tag, ...own } = options;
+        return Object.keys(own).length ? { ...clean, providerOptions: own } : clean;
+      })
+    };
+  });
+}
+var EFFORT_CLAIM_KEYS2 = /* @__PURE__ */ new Set([
+  "effort",
+  "reasoningEffort",
+  "reasoning_effort",
+  "thinkingLevel",
+  "thinkingBudget",
+  "thinking_budget",
+  "effortLevel",
+  "budget_tokens"
+]);
+function withoutEffortClaims(options) {
+  if (!options) return options;
+  const strip = (value, depth) => {
+    if (!value || typeof value !== "object" || Array.isArray(value) || depth > 3) return value;
+    return Object.fromEntries(Object.entries(value).filter(([key]) => !EFFORT_CLAIM_KEYS2.has(key)).map(([key, nested]) => [key, strip(nested, depth + 1)]));
+  };
+  return strip(options, 0);
+}
+function finishReasonOf(part) {
+  if (part.type !== "finish") return void 0;
+  const reason = part.finishReason;
+  return typeof reason === "string" ? reason : reason?.unified;
+}
+function toPoolEvent(part, key) {
+  const tagged = tagPart(part, key);
+  const event = { ...tagged };
+  if (part.type === "text-delta" || part.type === "reasoning-delta") event.text = part.delta;
+  if (part.type === "finish") event.finishReason = finishReasonOf(part);
+  event[RAW] = tagged;
+  return event;
+}
+function rawPart(event) {
+  return event[RAW];
+}
+function wrapPoolError(error) {
+  if (isRelayCoreError(error)) return error;
+  if (error instanceof PoolAttemptError) {
+    if (error.committed) return error.cause ?? error;
+    return new RelayCoreError(
+      "PROVIDER_LOAD_FAILED",
+      "All free pool members failed" + (error.cause ? ": " + describePoolFailure(error.cause) : ""),
+      { routeId: RELAY_POOL_ROUTE_ID, retryable: true, cause: error.cause ?? error }
+    );
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.startsWith("No eligible free pool members")) {
+    return new RelayCoreError("UNSUPPORTED_MODEL", message, { routeId: RELAY_POOL_ROUTE_ID, retryable: true, cause: error });
+  }
+  return error;
+}
+var sessions = new PoolSessionRoutes();
+async function memberModel(routeId, context) {
+  const { createRelayModel } = await import("./model-QBY2PRTS.js");
+  return createRelayModel(routeId, {
+    sessionId: context.sessionId,
+    ...context.options?.onDebug ? { onDebug: context.options.onDebug } : {},
+    ...context.options?.fetchImpl ? { fetchImpl: context.options.fetchImpl } : {},
+    ...context.options?.reasoning !== void 0 ? { reasoning: context.options.reasoning } : {}
+  });
+}
+function buildRoutes(members, context, skips) {
+  return members.map((item) => {
+    const key = poolRouteKey({ account: item.provider.id, endpointRevision: item.revision, model: item.model.id });
+    const scopes = [poolEndpointScope(item.provider.id, item.revision, item.model.id)];
+    const accountScopes = [poolAccountScope(item.provider.id)];
+    const label = item.provider.id + "/" + item.model.id;
+    return lazyPoolRoute({
+      member: item.member,
+      revision: item.revision,
+      freeStatus: "verified_free",
+      catalogVerified: true,
+      accessVerified: true,
+      billingSafe: true,
+      targets: item.receipt.targets,
+      toolsVerified: item.receipt.tools,
+      defaultEffortVerified: true,
+      effortLevels: item.receipt.effortLevels,
+      contextFits: true,
+      contextVerified: true
+    }, async () => {
+      const gone = (reason) => {
+        skips.push(label + ": " + reason);
+        return { skip: reason };
+      };
+      const off = await context.health.disabledFor(scopes);
+      if (off) return gone("DISABLED: " + off.note + " (run Test to re-enable)");
+      const until = await context.health.cooldownFor({ id: item.revision, scopes: [...scopes, ...accountScopes] });
+      if (until !== void 0 && until > context.now) return gone("cooling down after a failure");
+      const outputCap = poolOutputCap(item.provider.id, item.model.id, item.receipt.contextWindow);
+      const asked = context.call.maxOutputTokens ?? outputCap;
+      if (!Number.isSafeInteger(asked) || asked <= 0) return gone("invalid output limit");
+      const requestedOutput = Math.min(asked, outputCap);
+      const tools = context.call.tools && context.call.tools.length > POOL_MAX_TOOLS ? context.call.tools.slice(0, POOL_MAX_TOOLS) : context.call.tools;
+      const prompt = isolateHistory(context.call.prompt, key);
+      if (!poolRequestFitsWindow({ prompt, tools }, item.receipt.contextWindow, requestedOutput).fits) {
+        return gone("request too large for its context window");
+      }
+      let model;
+      try {
+        model = await memberModel(item.routeId, context);
+      } catch (error) {
+        if (isRelayCoreError(error) && (error.code === "CREDENTIAL_UNAVAILABLE" || error.code === "OAUTH_REFRESH_FAILED")) {
+          return gone("no credential");
+        }
+        return gone("could not be prepared: " + (error instanceof Error ? error.message : String(error)));
+      }
+      if (typeof model === "string" || typeof model.doStream !== "function") {
+        return gone("could not be prepared: unsupported model object");
+      }
+      context.onBuilt?.();
+      const member = model;
+      return {
+        route: poolRouteFromStream({
+          member: item.member,
+          revision: item.revision,
+          freeStatus: "verified_free",
+          catalogVerified: true,
+          accessVerified: true,
+          billingSafe: true,
+          targets: item.receipt.targets,
+          toolsVerified: item.receipt.tools,
+          defaultEffortVerified: true,
+          effortLevels: item.receipt.effortLevels,
+          contextFits: true,
+          contextVerified: true
+        }, (abortSignal) => {
+          const source = (async () => (await member.doStream({
+            ...context.call,
+            prompt,
+            tools,
+            maxOutputTokens: requestedOutput,
+            providerOptions: withoutEffortClaims(context.call.providerOptions),
+            abortSignal
+          })).stream)();
+          return (async function* () {
+            const reader = (await source).getReader();
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) return;
+                yield toPoolEvent(value, key);
+              }
+            } finally {
+              await reader.cancel().catch(() => {
+              });
+            }
+          })();
+        }, { store: context.health, scopes, accountScopes })
+      };
+    });
+  });
+}
+async function* runPool(options, call) {
+  const now = Date.now();
+  const state = await loadPoolStateForCall();
+  if (!state) {
+    throw new RelayCoreError("UNSUPPORTED_MODEL", "Relay Free Pool is not enabled or has no members \u2014 set it up with `relay-ai pool` or relay-ai ui.", { routeId: RELAY_POOL_ROUTE_ID });
+  }
+  const members = servableMembers(state, now);
+  const skips = [];
+  const requestId = randomUUID2().slice(0, 8);
+  const signal = call.abortSignal ?? new AbortController().signal;
+  const started = { at: Date.now() };
+  let answering;
+  const routes = buildRoutes(members, {
+    options,
+    call,
+    requestId,
+    now,
+    health: new PoolHealthStore(),
+    // A host-supplied conversation id is kept; otherwise Go/Zen members still get a header for this call.
+    sessionId: options?.sessionId ?? randomUUID2()
+  }, skips);
+  const hasTools = Boolean(call.tools?.length);
+  const events = dispatchFreePool(state.pool, routes, {
+    target: "core",
+    tools: hasTools,
+    effort: "auto",
+    signal,
+    ...options?.sessionId ? { conversationScope: options.sessionId } : {}
+  }, {
+    limits: { ...DEFAULT_POOL_LIMITS, attempts: MAX_POOL_ATTEMPTS },
+    sessions,
+    retryable: retryPoolFailure,
+    onAttempt: (id) => {
+      answering = id;
+      started.at = Date.now();
+    },
+    onFailure: (id, error) => {
+      const member = poolRouteMember(id);
+      if (!member) return;
+      const reason = describePoolFailure(error);
+      const detail = reason.startsWith("simulated") ? void 0 : poolErrorDetail(error);
+      recordPoolActivity({ target: "core", event: "failed", ...member, requestId, reason, ...detail ? { detail } : {}, ms: Date.now() - started.at });
+    }
+  });
+  let served = false;
+  try {
+    for await (const event of events) {
+      if (event.type === "finish") served = true;
+      yield rawPart(event);
+    }
+  } catch (error) {
+    if (!signal.aborted) {
+      for (const line of skips) {
+        const [member, ...reason] = line.split(": ");
+        const [providerId, ...model] = (member ?? "").split("/");
+        recordPoolActivity({ target: "core", event: "failed", providerId: providerId ?? "pool", modelId: model.join("/") || "none", requestId, reason: "skipped: " + reason.join(": ") });
+      }
+      recordPoolActivity({ target: "core", event: "gave-up", providerId: "pool", modelId: "none", requestId, ms: Date.now() - started.at });
+    }
+    throw wrapPoolError(error);
+  }
+  const answered = answering ? poolRouteMember(answering) : void 0;
+  if (served && answered) recordPoolActivity({ target: "core", event: "served", ...answered, requestId, ms: Date.now() - started.at });
+}
+async function generateFromStream(parts) {
+  const text = /* @__PURE__ */ new Map();
+  const reasoning = /* @__PURE__ */ new Map();
+  const content = [];
+  const order = [];
+  let warnings = [];
+  let finishReason = void 0;
+  let usage = void 0;
+  let providerMetadata;
+  const open = (map, kind, id, meta) => {
+    if (!map.has(id)) {
+      map.set(id, { text: "", ...meta ? { meta } : {} });
+      order.push({ kind, id });
+    }
+  };
+  for await (const part of parts) {
+    const p = part;
+    switch (p.type) {
+      case "stream-start":
+        warnings = p.warnings;
+        break;
+      case "text-start":
+        open(text, "text", p.id, p.providerMetadata);
+        break;
+      case "text-delta":
+        open(text, "text", p.id);
+        text.get(p.id).text += p.delta ?? "";
+        break;
+      case "text-end":
+        if (p.providerMetadata) {
+          open(text, "text", p.id);
+          text.get(p.id).meta = p.providerMetadata;
+        }
+        break;
+      case "reasoning-start":
+        open(reasoning, "reasoning", p.id, p.providerMetadata);
+        break;
+      case "reasoning-delta":
+        open(reasoning, "reasoning", p.id);
+        reasoning.get(p.id).text += p.delta ?? "";
+        break;
+      case "reasoning-end":
+        if (p.providerMetadata) {
+          open(reasoning, "reasoning", p.id);
+          reasoning.get(p.id).meta = p.providerMetadata;
+        }
+        break;
+      case "tool-call":
+      case "file":
+      case "source":
+        order.push({ kind: "text", id: "" });
+        content.push(p);
+        break;
+      case "finish":
+        finishReason = p.finishReason;
+        usage = p.usage;
+        providerMetadata = p.providerMetadata;
+        break;
+      default:
+        break;
+    }
+  }
+  const leading = [];
+  for (const entry of order) {
+    if (entry.id === "") continue;
+    const source = (entry.kind === "text" ? text : reasoning).get(entry.id);
+    leading.push({ type: entry.kind, text: source.text, ...source.meta ? { providerMetadata: source.meta } : {} });
+  }
+  return {
+    content: [...leading, ...content],
+    finishReason,
+    usage,
+    warnings,
+    ...providerMetadata ? { providerMetadata } : {}
+  };
+}
+function createRelayPoolModel(options) {
+  const state = loadPoolState();
+  const members = state ? servableMembers(state, Date.now(), false) : [];
+  if (!state || members.length === 0) {
+    throw new RelayCoreError("UNSUPPORTED_MODEL", "Relay Free Pool is not enabled or has no usable members \u2014 set it up with `relay-ai pool` or relay-ai ui.", { routeId: RELAY_POOL_ROUTE_ID });
+  }
+  if (options?.reasoning !== void 0) {
+    const levels = commonEffortLevels(members);
+    if (!levels.includes(options.reasoning)) {
+      throw new RelayCoreError(
+        "UNSUPPORTED_REASONING_LEVEL",
+        `Relay Free Pool cannot apply reasoning level "${options.reasoning}": every member must have verified it (verified by all: ${levels.join(", ") || "none"}).`,
+        { routeId: RELAY_POOL_ROUTE_ID }
+      );
+    }
+  }
+  const model = {
+    specificationVersion: "v4",
+    provider: "relay",
+    modelId: RELAY_POOL_MODEL_ID,
+    supportedUrls: {},
+    async doStream(call) {
+      const iterator = runPool(options, call)[Symbol.asyncIterator]();
+      const first = await iterator.next();
+      const stream = new ReadableStream({
+        async start(controller) {
+          if (!first.done) controller.enqueue(first.value);
+          else controller.close();
+        },
+        async pull(controller) {
+          try {
+            const next = await iterator.next();
+            if (next.done) controller.close();
+            else controller.enqueue(next.value);
+          } catch (error) {
+            controller.error(error);
+          }
+        },
+        async cancel() {
+          await iterator.return?.(void 0);
+        }
+      });
+      return { stream };
+    },
+    async doGenerate(call) {
+      const result = await generateFromStream({ [Symbol.asyncIterator]: () => runPool(options, call) });
+      return result;
+    }
+  };
+  return model;
+}
+
 export {
   renderMultiAgentV2Feature,
   supportsMultiAgentV2,
@@ -2475,7 +3142,6 @@ export {
   dispatchFreePool,
   lazyPoolRoute,
   sdkPoolRoute,
-  poolRouteFromStream,
   poolRequestFitsWindow,
   translateResponsesRequest,
   streamResponsesResponse,
@@ -2491,13 +3157,30 @@ export {
   POOL_MAX_TOOLS,
   translatedEffortClaim,
   prepareCodexPoolRoutes,
-  PoolSessionRoutes,
   FREE_POOL_MODEL_ID,
   FREE_POOL_PROVIDER_ID,
   DEFAULT_POOL_LIMITS,
   CodexPoolRuntime,
   poolCatalogEntry,
   codexPoolCatalogEntry,
-  codexPoolCatalogModel
+  codexPoolCatalogModel,
+  RelayCoreError,
+  isRelayCoreError,
+  reasoningNpmForRoute,
+  resolveReasoningProviderOptions,
+  withReasoningProviderOptions,
+  withRequestHeaders,
+  RELAY_POOL_PROVIDER_ID,
+  RELAY_POOL_MODEL_ID,
+  RELAY_POOL_ROUTE_ID,
+  loadPoolState,
+  loadPoolStateForCall,
+  servableMembers,
+  relayPoolDescriptor,
+  tagPart,
+  isolateHistory,
+  createRelayPoolModel,
+  parseRelayRouteId,
+  loadCoreRegistry
 };
 //# sourceMappingURL=chunk-DZWBPL4X.js.map

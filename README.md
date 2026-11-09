@@ -17,7 +17,7 @@
 
 📺 **Watch the Demos**
 
-| **Claude Code / Cowork / Desktop** | **Codex CLI & Desktop App** | **Gemini CLI** | **v0.4.1: UI & Antigravity** | **Server Gateway** |
+| **Claude Code / Cowork / Desktop** | **Codex CLI & Desktop App** | **Gemini CLI** | **UI & Antigravity** | **Server Gateway** |
 |:---:|:---:|:---:|:---:|:---:|
 | [![Claude Demo](https://img.youtube.com/vi/IvsUPHLhX0o/mqdefault.jpg)](https://youtu.be/IvsUPHLhX0o) | [![Codex Demo](https://img.youtube.com/vi/42oiOB8IAu4/mqdefault.jpg)](https://youtu.be/42oiOB8IAu4) | [![Gemini Demo](https://img.youtube.com/vi/g7JKvqOHJl4/mqdefault.jpg)](https://www.youtube.com/watch?v=g7JKvqOHJl4) | [![UI & Antigravity Demo](https://img.youtube.com/vi/8vXJ0LfpdoY/mqdefault.jpg)](https://www.youtube.com/watch?v=8vXJ0LfpdoY) | [![Server Gateway Demo](https://img.youtube.com/vi/4CEw0MQUE9I/mqdefault.jpg)](https://www.youtube.com/watch?v=4CEw0MQUE9I) |
 
@@ -95,7 +95,7 @@ To fully remove the tool and all its configuration data, you can delete the conf
 | Command | Description |
 |---------|-------------|
 | `relay-ai` | Print help (does not launch Claude Code) |
-| `relay-ai ui` | **Open the visual launcher** — manage providers and launch any tool from a browser UI |
+| `relay-ai ui` | **Open the visual launcher** — manage providers and launch any tool from a browser UI. Connects to an already-running Relay UI (tool launches keep one running in the background; `RELAY_AI_NO_UI=1` skips it) |
 | `relay-ai ui --server` | **Server + Admin UI** (Docker-friendly) — providers / favorites / gateway only; binds `0.0.0.0` |
 | `relay-ai claude` | Pick a provider → launch Claude Code |
 | `relay-ai providers` | Add, import, list, remove, and refresh your AI providers |

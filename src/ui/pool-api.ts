@@ -10,7 +10,7 @@ import { loadRegistry } from '../registry/io.js';
 import { guessModelKindFromName, nameKindOutranksChatTest, type ModelKind } from '../registry/model-kind.js';
 import { modelsDevModelKind } from '../registry/models-dev.js';
 import { groupPoolActivity, readPoolActivity, summarizePoolEvents } from '../pool/activity.js';
-import { addFreePoolMember, parseFreePool, removeFreePoolMember } from '../pool/membership.js';
+import { addFreePoolMember, moveFreePoolMemberTo, parseFreePool, removeFreePoolMember } from '../pool/membership.js';
 import { currentPoolReceipt, poolEndpointRevision } from '../pool/capabilities.js';
 import { clearDisabledPoolMember, disabledMessage, disabledPoolMembers } from '../pool/disabled.js';
 import { poolDiagnostic, poolMembershipProblem, poolRoutingProblem, verifyConfiguredPoolMember } from '../pool/verify.js';
@@ -175,7 +175,9 @@ export async function verifyUiPoolMember(
 
 export async function handlePoolApi(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
-    const providers = await fetchProviderCatalog();
+    // Loading the catalog is the slow part; reorder, remove, effort and on/off never need it.
+    let catalog: LocalProvider[] | undefined;
+    const loadCatalog = async () => (catalog ??= await fetchProviderCatalog());
     let pool = parseFreePool(loadPreferences().freePool);
     if (req.method === 'POST') {
       const body = JSON.parse(await readBody(req));
@@ -190,7 +192,7 @@ export async function handlePoolApi(req: IncomingMessage, res: ServerResponse): 
         if (typeof member.providerId !== 'string' || typeof member.modelId !== 'string') throw new Error('Choose a provider account and model');
         const index = pool.members.findIndex(item => item.providerId === member.providerId && item.modelId === member.modelId);
         if (body.action === 'add') {
-          const provider = providers.find(item => item.id === member.providerId);
+          const provider = (await loadCatalog()).find(item => item.id === member.providerId);
           const model = provider?.models.find(item => item.id === member.modelId);
           if (!provider || !model) throw new Error('Model is unavailable or hidden');
           const reason = poolMembershipProblem(provider, model) ?? failedTestProblem(member.providerId, member.modelId);
@@ -198,13 +200,17 @@ export async function handlePoolApi(req: IncomingMessage, res: ServerResponse): 
           pool = addFreePoolMember(pool, member);
         } else if (body.action === 'remove') pool = removeFreePoolMember(pool, member);
         else if (body.action === 'move') {
-          if (index < 0 || ![-1, 1].includes(body.direction)) throw new Error('Invalid priority change');
-          const next = index + body.direction;
-          if (next >= 0 && next < pool.members.length) [pool.members[index], pool.members[next]] = [pool.members[next]!, pool.members[index]!];
+          if (index < 0) throw new Error('Invalid priority change');
+          if (Number.isInteger(body.toIndex)) {
+            pool = moveFreePoolMemberTo(pool, member, body.toIndex);
+          } else if ([-1, 1].includes(body.direction)) {
+            const next = index + body.direction;
+            if (next >= 0 && next < pool.members.length) pool = moveFreePoolMemberTo(pool, member, next);
+          } else throw new Error('Invalid priority change');
         } else if (body.action === 'verify') {
           // Backward-compatible explicit endpoint; the normal UI reuses Test instead.
           if (index < 0) throw new Error('Add the model to the pool first');
-          const provider = providers.find(item => item.id === member.providerId);
+          const provider = (await loadCatalog()).find(item => item.id === member.providerId);
           const model = provider?.models.find(item => item.id === member.modelId);
           if (!provider || !model) throw new Error('Model is unavailable or hidden');
           const result = await verifyUiPoolMember(member.providerId, member.modelId, AbortSignal.timeout(body.reasoning === true ? 100_000 : 20_000), { reasoning: body.reasoning === true });
@@ -218,6 +224,7 @@ export async function handlePoolApi(req: IncomingMessage, res: ServerResponse): 
       sendJson(res, 200, { ok: true });
       return;
     }
+    const providers = await loadCatalog();
     sendJson(res, 200, { ...poolView(providers, pool, await disabledPoolMembers(providers, pool)), activity: poolActivityView() });
   } catch (error) {
     sendJson(res, 400, { error: error instanceof Error ? error.message : 'Unable to update the free pool' });
@@ -251,7 +258,7 @@ export function poolView(providers: LocalProvider[], pool: FreePoolPreferences, 
       reason: membershipProblem ?? (off ? disabledMessage(off.note) : routingProblem),
       // The window routing actually uses is the one saved by the last Test; it can lag a size set or measured since.
       routingContextWindow: receipt?.contextWindow,
-      targets: receipt?.targets ?? [], expiresAt: receipt?.expiresAt, effortLevels: receipt?.effortLevels ?? [] };
+      targets: receipt?.targets ?? [], effortLevels: receipt?.effortLevels ?? [] };
   });
   // This is the same free-only universe shown by the Providers table. Models
   // that the pool cannot transport stay visible with an explanation so the

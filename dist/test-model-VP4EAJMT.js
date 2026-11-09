@@ -79,6 +79,10 @@ async function probeModel(providerId, modelId, signal) {
       onError: () => {
       }
     });
+    for (const promise of [result.text, result.toolCalls, result.toolResults, result.finishReason, result.usage, result.response]) {
+      Promise.resolve(promise).catch(() => {
+      });
+    }
     for await (const part of result.stream) {
       if (part.type === "error") return inspect(part.error);
       if (part.type === "text-delta") {
@@ -89,6 +93,7 @@ async function probeModel(providerId, modelId, signal) {
     }
     return {};
   } catch (error) {
+    if (controller.signal.aborted) return { chat: true };
     return inspect(error);
   }
 }
@@ -170,6 +175,10 @@ async function testModel(providerId, modelId, signal, opts) {
       onError: () => {
       }
     });
+    for (const promise of [result.text, result.toolCalls, result.toolResults, result.finishReason, result.usage, result.response]) {
+      Promise.resolve(promise).catch(() => {
+      });
+    }
     let text = "";
     let finished = false;
     let hitLimit = false;

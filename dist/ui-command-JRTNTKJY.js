@@ -19,12 +19,15 @@ import {
   findCodexApp,
   formatGatewayUrls,
   gatewayProviderLabel,
+  getRelayAccountUsage,
   hostFromHeader,
-  loadServerModels,
+  loadServerCatalog,
   normalizeFavoriteModels,
   openAiIdCollisions,
+  prepareServerPool,
   providerOptionsFromCatalog,
   readOAuthAccountLabel,
+  readRelayAccountUsage,
   resolveAdvertiseAddresses,
   resolveAdvertiseGatewayPort,
   resolveServerUpstreamApiKey,
@@ -67,6 +70,7 @@ import {
   poolCatalogEntry
 } from "./chunk-DZWBPL4X.js";
 import {
+  clearPoolActivity,
   fetchProviderCatalog,
   providersForCodexSubagents,
   providersForTarget
@@ -174,7 +178,7 @@ import {
 
 // src/ui-command.ts
 import { createServer } from "http";
-import { readFileSync, readdirSync, writeFileSync as writeFileSync2, unlinkSync, existsSync as existsSync3, mkdirSync } from "fs";
+import { readFileSync, readdirSync } from "fs";
 import { join as join2 } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
@@ -411,6 +415,10 @@ function quoteShellArg(value) {
 function relayCliPath() {
   return "relay-ai";
 }
+var POOL_LAUNCH_ID = "relay-free-pool";
+var POOL_FLAG_APPS = /* @__PURE__ */ new Set(["claude", "codex"]);
+var POOL_BOOT_APPS = /* @__PURE__ */ new Set(["claude-app", "codex-app", "antigravity", "antigravity-ide", "agy"]);
+var POOL_LAUNCH_APPS = /* @__PURE__ */ new Set([...POOL_FLAG_APPS, ...POOL_BOOT_APPS]);
 function getRelayLaunchCommand(appId, options = {}) {
   const app = getSupportedApp(appId);
   if (!app) throw new Error(`Unsupported app: ${appId}`);
@@ -419,8 +427,10 @@ function getRelayLaunchCommand(appId, options = {}) {
   }
   const args = [app.relayCommand];
   if (options.pool) {
-    if (!["claude", "codex"].includes(app.id) || options.httpProxy || options.withNative || options.providerId || options.modelId) throw new Error("Free pool launches require Claude Code CLI or Codex CLI without another model selection.");
-    args.push("--pool");
+    if (options.httpProxy || options.withNative || options.providerId || options.modelId) throw new Error("Choose the free pool alone, without another model selection.");
+    if (POOL_FLAG_APPS.has(app.id)) args.push("--pool");
+    else if (POOL_BOOT_APPS.has(app.id)) args.push("--provider", POOL_LAUNCH_ID, "--model", POOL_LAUNCH_ID);
+    else throw new Error(`${app.name} cannot start on the free pool.`);
   }
   if (options.trace) {
     args.push("--trace");
@@ -586,8 +596,11 @@ async function doStartGatewayServer(req, opts) {
     }
   }
   let models;
+  let poolSetup;
   try {
-    models = await loadServerModels();
+    const loaded = await loadServerCatalog();
+    models = loaded.models;
+    poolSetup = prepareServerPool(loaded.providers);
   } catch (err) {
     return { ok: false, error: `Failed to load models: ${err instanceof Error ? err.message : String(err)}` };
   }
@@ -604,10 +617,11 @@ async function doStartGatewayServer(req, opts) {
   }
   if (req.freeModelsOnly) {
     models = filterServerModelsByFreeStatus(models);
-    if (models.length === 0) {
+    if (models.length === 0 && !poolSetup) {
       return { ok: false, error: "No free models matched the current server filters." };
     }
   }
+  if (poolSetup) models = [...models, poolSetup.model];
   if (models.length === 0) {
     return { ok: false, error: "No models to expose. Add providers or adjust the exposed-provider filter." };
   }
@@ -633,6 +647,7 @@ async function doStartGatewayServer(req, opts) {
       catalog: createGatewayModelCatalog(models, gateway),
       backends: BACKENDS,
       gateway,
+      ...poolSetup ? { pool: poolSetup.options } : {},
       debugLogPath: getServerDebugLogPath()
     });
   } catch (err) {
@@ -733,7 +748,11 @@ function handleUiApiRequest(req, res, opts = {}) {
   }
   const url = req.url ?? "";
   traceUi(opts, `${req.method ?? "GET"} ${url}`);
-  if (url === "/api/pool" && (req.method === "GET" || req.method === "POST")) {
+  if (url === "/api/pool/activity/clear" && req.method === "POST") {
+    handleClearPoolActivity(res);
+  } else if (url === "/api/ui/shutdown" && req.method === "POST") {
+    handleUiShutdown(res, opts);
+  } else if (url === "/api/pool" && (req.method === "GET" || req.method === "POST")) {
     void handlePoolApi(req, res);
   } else if (url === "/api/config" && req.method === "GET") {
     handleGetConfig(res);
@@ -760,6 +779,10 @@ function handleUiApiRequest(req, res, opts = {}) {
     handleAddCustomProvider(req, res);
   } else if (url === "/api/providers/edit-custom" && req.method === "POST") {
     handleEditCustomProvider(req, res);
+  } else if (url === "/api/usage" && req.method === "GET") {
+    void handleGetUsage(res);
+  } else if (url === "/api/usage/refresh" && req.method === "POST") {
+    void handleUsageRefresh(req, res);
   } else if (url === "/api/intelligence/status" && req.method === "GET") {
     handleIntelligenceStatus(res);
   } else if (url === "/api/intelligence/key" && req.method === "POST") {
@@ -821,6 +844,23 @@ function handleUiApiRequest(req, res, opts = {}) {
   } else {
     sendJson(res, 404, { error: "Not found" });
   }
+}
+function handleClearPoolActivity(res) {
+  clearPoolActivity();
+  sendJson(res, 200, { ok: true });
+}
+function handleUiShutdown(res, opts) {
+  sendJson(res, 200, { ok: true, message: "Shutting down Relay UI" });
+  setTimeout(() => {
+    try {
+      if (opts.onShutdown) {
+        opts.onShutdown();
+      } else {
+        process.exit(0);
+      }
+    } catch {
+    }
+  }, 100);
 }
 async function handleGetUpdateStatus(res) {
   sendJson(res, 200, await checkForUpdates());
@@ -1005,9 +1045,10 @@ async function handleGetModels(res, target, codexSubagents = false, uiMode) {
         });
       }
     }
-    if (target === "claude" || target === "codex") {
+    const poolTarget = target ? POOL_TARGET_FOR_LAUNCH[target] : void 0;
+    if (poolTarget) {
       const pool = parseFreePool(loadPreferences().freePool);
-      const entry = pool.enabled ? poolCatalogEntry(pool, pool.receipts, target) : void 0;
+      const entry = pool.enabled ? poolCatalogEntry(pool, pool.receipts, poolTarget) : void 0;
       if (entry) providers.push({
         id: "relay-free-pool",
         name: "Relay Free Pool",
@@ -1617,6 +1658,27 @@ async function handleIntelligenceRefresh(res) {
     intelligenceRefreshing = false;
   }
 }
+async function handleGetUsage(res) {
+  try {
+    sendJson(res, 200, { ok: true, accounts: await readRelayAccountUsage({ fetchMissing: true }) });
+  } catch {
+    sendJson(res, 500, { ok: false, error: "Could not read usage." });
+  }
+}
+async function handleUsageRefresh(req, res) {
+  try {
+    const raw = await readBody(req);
+    const body = raw.trim() ? JSON.parse(raw) : {};
+    if (body.providerId !== void 0 && typeof body.providerId !== "string") {
+      sendJson(res, 400, { ok: false, error: "providerId must be a string" });
+      return;
+    }
+    const providerIds = typeof body.providerId === "string" ? [body.providerId] : void 0;
+    sendJson(res, 200, { ok: true, accounts: await getRelayAccountUsage({ providerIds }) });
+  } catch {
+    sendJson(res, 400, { ok: false, error: "Could not check usage." });
+  }
+}
 async function handleIntelligenceRemove(res) {
   await removeIntelligence();
   sendJson(res, 200, { ok: true, ...await intelligenceStatusBody() });
@@ -1988,6 +2050,13 @@ function handleGetApps(res) {
     sendJson(res, 500, { error: String(err) });
   }
 }
+var POOL_TARGET_FOR_LAUNCH = {
+  claude: "claude",
+  "claude-app": "claude",
+  codex: "codex",
+  "codex-app": "codex",
+  antigravity: "antigravity"
+};
 var APP_ID_TO_LAUNCH_TARGET = {
   claude: "claude",
   "claude-app": "claude-app",
@@ -2009,8 +2078,8 @@ async function handleLaunchApp(req, res, opts) {
       sendJson(res, 400, { error: "pool must be a boolean" });
       return;
     }
-    if (pool && (!["claude", "codex"].includes(body.appId) || body.favorites || body.providerId || body.modelId || body.httpProxy || body.withNative)) {
-      sendJson(res, 400, { error: "Choose the free pool alone for Claude Code CLI or Codex CLI." });
+    if (pool && (!POOL_LAUNCH_APPS.has(body.appId) || body.favorites || body.providerId || body.modelId || body.httpProxy || body.withNative)) {
+      sendJson(res, 400, { error: "Choose the free pool alone; Gemini CLI cannot start on it." });
       return;
     }
     let { providerId, modelId } = body;
@@ -2283,8 +2352,7 @@ async function handleBrowseFolder(res) {
 // src/ui-command.ts
 var __dirname = dirname(fileURLToPath(import.meta.url));
 var PUBLIC_DIR = join2(__dirname, "ui", "public");
-var LOCK_FILE = join2(getAppHome(), "ui.lock");
-var DEFAULT_SERVER_UI_PORT = 8787;
+var DEFAULT_FULL_UI_PORT = 17646;
 var MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
@@ -2313,16 +2381,20 @@ function resolveUiRuntimeConfig(opts = {}, env = process.env) {
       mode,
       host: "0.0.0.0",
       port: resolveServerUiPort(opts, env),
+      fallbackToRandomPort: false,
       openBrowser: false,
       confirmShutdownOnSigint: false
     };
   }
+  const envPort = Number(env.RELAY_AI_UI_PORT);
+  const requested = opts.port ?? (Number.isInteger(envPort) && envPort > 0 && envPort < 65536 ? envPort : void 0);
   return {
     mode,
     host: "127.0.0.1",
-    port: opts.port ?? 0,
-    openBrowser: true,
-    confirmShutdownOnSigint: true
+    port: requested ?? DEFAULT_FULL_UI_PORT,
+    fallbackToRandomPort: requested === void 0,
+    openBrowser: !opts.background,
+    confirmShutdownOnSigint: !opts.background
   };
 }
 function buildStaticCache(mode) {
@@ -2344,45 +2416,13 @@ function buildStaticCache(mode) {
   }
   return cache;
 }
-function removeLock() {
+async function openUiInBrowser(url) {
   try {
-    unlinkSync(LOCK_FILE);
-  } catch {
-  }
-}
-async function probeServerHealth(port) {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 500);
-    const res = await fetch(`http://127.0.0.1:${port}/api/config`, { signal: controller.signal });
-    clearTimeout(timer);
-    if (res.status === 200) {
-      const data = await res.json().catch(() => null);
-      if (data && typeof data === "object") return true;
-    }
-    return false;
+    const { default: open } = await import("open");
+    await open(url);
+    return true;
   } catch {
     return false;
-  }
-}
-async function checkExistingServer() {
-  if (!existsSync3(LOCK_FILE)) return null;
-  try {
-    const { pid, port } = JSON.parse(readFileSync(LOCK_FILE, "utf8"));
-    if (pid === process.pid) {
-      removeLock();
-      return null;
-    }
-    process.kill(pid, 0);
-    const isAlive = await probeServerHealth(port ?? DEFAULT_SERVER_UI_PORT);
-    if (!isAlive) {
-      removeLock();
-      return null;
-    }
-    return `http://127.0.0.1:${port}`;
-  } catch {
-    removeLock();
-    return null;
   }
 }
 function isUiApiRoute(url) {
@@ -2404,13 +2444,52 @@ async function resolveUiShutdownDecision(signal, promptClose = () => p.confirm({
   if (p.isCancel(shouldClose)) return "close";
   return shouldClose ? "close" : "keep";
 }
+async function stopUiServer() {
+  const lock = readUiLock();
+  let pidAlive = false;
+  if (typeof lock?.pid === "number" && lock.pid !== process.pid) {
+    try {
+      process.kill(lock.pid, 0);
+      pidAlive = true;
+    } catch {
+    }
+  }
+  const existing = await checkExistingServer();
+  if (!existing && !pidAlive) {
+    removeLock();
+    return { stopped: false, message: "Relay UI is not running." };
+  }
+  const port = lock?.port;
+  const pid = lock?.pid;
+  if (existing) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 800);
+      await fetch(`${existing}/api/ui/shutdown`, { method: "POST", signal: controller.signal });
+      clearTimeout(timer);
+    } catch {
+    }
+  }
+  if (pidAlive && typeof pid === "number") {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+    }
+  }
+  removeLock();
+  return { stopped: true, message: `Relay UI stopped${port ? ` (port ${port})` : ""}.` };
+}
 async function runUiCommand(opts = {}) {
   const runtime = resolveUiRuntimeConfig(opts);
   await ensureOpencodeCloudProviders();
   const existing = await checkExistingServer();
   if (existing) {
+    if (opts.background) return 0;
+    if (runtime.openBrowser) await openUiInBrowser(existing);
     console.log(`
-  ${pc.bold("relay-ai UI")} already running at ${pc.cyan(existing)}
+  ${pc.dim("Relay UI is already running \u2014 connected to it.")}`);
+    console.log(`${formatUiAvailableLine(existing)}`);
+    console.log(`  ${pc.dim("To shut it down, run: relay-ai ui stop")}
 `);
     return 0;
   }
@@ -2421,7 +2500,13 @@ async function runUiCommand(opts = {}) {
   const traceLogPath = opts.trace ? getUiDebugLogPath() : void 0;
   const trace = traceLogPath ? makeTraceLogger(traceLogPath) : void 0;
   trace?.(`ui server starting mode=${runtime.mode}`);
-  const server = createServer((req, res) => {
+  let server = null;
+  const cleanup = () => {
+    removeOwnUiLock();
+    server?.close();
+    process.exit(0);
+  };
+  server = createServer((req, res) => {
     const url2 = req.url ?? "/";
     res.setHeader("X-Content-Type-Options", "nosniff");
     if (isUiApiRoute(url2)) {
@@ -2433,7 +2518,8 @@ async function runUiCommand(opts = {}) {
           console.log(`
   ${formatUiServerLifecycleMessage(event)}
 `);
-        }
+        },
+        onShutdown: cleanup
       });
       return;
     }
@@ -2448,10 +2534,20 @@ async function runUiCommand(opts = {}) {
     res.writeHead(404);
     res.end("Not found");
   });
-  await new Promise((resolve, reject) => {
-    server.listen(runtime.port, runtime.host, () => resolve());
+  const listenOn = (port2) => new Promise((resolve, reject) => {
     server.once("error", reject);
+    server.listen(port2, runtime.host, () => {
+      server.off("error", reject);
+      resolve();
+    });
   });
+  try {
+    await listenOn(runtime.port);
+  } catch (err) {
+    if (!runtime.fallbackToRandomPort || err.code !== "EADDRINUSE") throw err;
+    trace?.(`ui port ${runtime.port} in use, falling back to a random port`);
+    await listenOn(0);
+  }
   const addr = server.address();
   if (!addr || typeof addr === "string") {
     console.error("Failed to bind server");
@@ -2460,18 +2556,12 @@ async function runUiCommand(opts = {}) {
   const port = addr.port;
   const displayHost = runtime.host === "0.0.0.0" ? "127.0.0.1" : runtime.host;
   const url = `http://${displayHost}:${port}`;
-  mkdirSync(getAppHome(), { recursive: true });
-  writeFileSync2(LOCK_FILE, JSON.stringify({ pid: process.pid, port, mode: runtime.mode }));
+  writeUiLock(port, runtime.mode, opts.background === true);
   if (resolveServerAutostart()) {
     startGatewayServerFromSavedConfig().catch((err) => {
       trace?.(`gateway autostart error: ${err instanceof Error ? err.message : String(err)}`);
     });
   }
-  const cleanup = () => {
-    removeLock();
-    server.close();
-    process.exit(0);
-  };
   let handlingSignal = false;
   const handleSignal = async (signal) => {
     if (handlingSignal) return;
@@ -2493,41 +2583,37 @@ async function runUiCommand(opts = {}) {
   process.on("SIGTERM", () => {
     void handleSignal("SIGTERM");
   });
-  const modeLabel = runtime.mode === "server" ? " (server admin)" : "";
+  if (runtime.openBrowser) {
+    const opened = await openUiInBrowser(url);
+    trace?.(`browser open ${opened ? "" : "failed "}${url}`);
+  }
+  const modeLabel = runtime.mode === "server" ? "Server admin UI \xB7 " : "";
   console.log(`
-  ${pc.bold("relay-ai UI")}${modeLabel}  ${pc.cyan(url)}
-  ${pc.dim("Press Ctrl+C to stop")}
-`);
+  ${pc.dim(`${modeLabel}Press Ctrl+C to stop`)}`);
   if (runtime.mode === "server") {
-    console.log(`  ${pc.dim("Gateway API (when started from Server tab): http://127.0.0.1:17645")}
-`);
+    console.log(`  ${pc.dim("Gateway API (when started from Server tab): http://127.0.0.1:17645")}`);
   }
   if (traceLogPath) {
-    console.log(`  ${pc.dim(`Trace log: ${traceLogPath}`)}
-`);
+    console.log(`  ${pc.dim(`Trace log: ${traceLogPath}`)}`);
     trace?.(`ui server listening ${url}`);
   }
-  if (runtime.openBrowser) {
-    try {
-      const { default: open } = await import("open");
-      await open(url);
-      trace?.(`browser open ${url}`);
-    } catch {
-      trace?.(`browser open failed ${url}`);
-    }
-  }
+  console.log(`${formatUiAvailableLine(url)}
+`);
   await new Promise(() => {
   });
   return 0;
 }
 export {
+  DEFAULT_FULL_UI_PORT,
   checkExistingServer,
   formatUiServerLifecycleMessage,
   isUiApiRoute,
+  openUiInBrowser,
   probeServerHealth,
   resolveUiMode,
   resolveUiRuntimeConfig,
   resolveUiShutdownDecision,
-  runUiCommand
+  runUiCommand,
+  stopUiServer
 };
 //# sourceMappingURL=ui-command-JRTNTKJY.js.map

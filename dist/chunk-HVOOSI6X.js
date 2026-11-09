@@ -27,22 +27,29 @@ import {
 } from "./chunk-GJCRQMOZ.js";
 import {
   MAX_POOL_ATTEMPTS,
+  POOL_MAX_TOOLS,
   dispatchFreePool,
   formatCodexModelLabel,
   requestFingerprint
 } from "./chunk-DZWBPL4X.js";
 import {
+  PoolHealthStore,
   describePoolFailure,
   extractConversationId,
   fetchProviderCatalog,
   localProvidersToServerModels,
   oauthAuthRef,
   openCodeGoHeaders,
+  poolAccountScope,
+  poolEndpointScope,
   poolErrorDetail,
+  poolProviderHeaders,
   poolRouteMember,
+  poolRoutingProblem,
   providerRefreshToken,
   providersForTarget,
   recordPoolActivity,
+  resolveLocalProviderApiKey,
   retryPoolFailure,
   toOAuthRegistryId
 } from "./chunk-UF5HSQ52.js";
@@ -57,6 +64,7 @@ import {
   buildPricingIndex,
   classifyFreeStatus,
   createLanguageModel,
+  currentPoolReceipt,
   encodeToolUseId,
   enrichModelsForProviderPricing,
   enrichPricingAsync,
@@ -73,6 +81,7 @@ import {
   getServerListenMode,
   getServerMaskGatewayIds,
   grabRoundTripSignature,
+  isAntigravityCloudCodeHelperSlot,
   isAuthorized,
   isFreeStatus,
   isSdkMigratedNpm,
@@ -82,7 +91,10 @@ import {
   localIsoTimestamp,
   localTimestamp,
   maxToolsForNpm,
+  parseFreePool,
   parseToolArguments,
+  poolEndpointRevision,
+  poolFreeStatus,
   printTraceLog,
   redactTraceLine,
   relayAnthropicMessages,
@@ -136,6 +148,7 @@ import {
   resolveApiKey,
   resolveContextWindow,
   resolveProviderCredential,
+  resolveProviderOAuthAccountId,
   routeLookupIds,
   runAntigravityOAuthFlow,
   runClaudeCodeOAuthFlow,
@@ -156,6 +169,13 @@ import {
   init_provider_templates,
   supportsAdditionalApiAccounts
 } from "./chunk-JPZ3S2TA.js";
+import {
+  hasApplicationDefaultCredentials,
+  loadVertexModelEntries,
+  resolveVertexLocation,
+  resolveVertexProject,
+  saveVertexModelEntries
+} from "./chunk-W32XKRNU.js";
 import {
   getAppHome
 } from "./chunk-TWCLCOFD.js";
@@ -2462,9 +2482,9 @@ function normalizeCloudCodeSchemaType(value) {
   }
   return value;
 }
-function isNullSchema(obj) {
-  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
-  const type = obj.type;
+function isNullSchema(obj2) {
+  if (!obj2 || typeof obj2 !== "object" || Array.isArray(obj2)) return false;
+  const type = obj2.type;
   return type === "null" || type === "NULL" || Array.isArray(type) && type.every((value) => value === "null" || value === "NULL");
 }
 function resolveLocalSchemaRef(ref, root) {
@@ -2474,10 +2494,10 @@ function resolveLocalSchemaRef(ref, root) {
   if (!defs || typeof defs !== "object" || Array.isArray(defs)) return void 0;
   return defs[name];
 }
-function stripDraftMeta(obj, root = void 0, resolvingRefs = /* @__PURE__ */ new Set()) {
-  if (!obj || typeof obj !== "object") return obj;
-  if (Array.isArray(obj)) return obj.map((value) => stripDraftMeta(value, root, resolvingRefs));
-  const source = obj;
+function stripDraftMeta(obj2, root = void 0, resolvingRefs = /* @__PURE__ */ new Set()) {
+  if (!obj2 || typeof obj2 !== "object") return obj2;
+  if (Array.isArray(obj2)) return obj2.map((value) => stripDraftMeta(value, root, resolvingRefs));
+  const source = obj2;
   const schemaRoot = root ?? source;
   if (typeof source.$ref === "string") {
     const resolved = resolveLocalSchemaRef(source.$ref, schemaRoot);
@@ -3387,6 +3407,224 @@ function startProxy(completionsUrl, modelId, debug = false, contextWindow, sdk, 
   }], clientModelId, debug);
 }
 
+// src/pool/claude-prepare.ts
+function omitClaudeEffort(body, level) {
+  const output = { ...body.output_config };
+  delete output.effort;
+  if (level !== null) output.effort = level;
+  const next = { ...body };
+  if (Object.keys(output).length > 0) next.output_config = output;
+  else delete next.output_config;
+  return next;
+}
+async function prepareClaudePoolRoutes(options) {
+  const routes = [];
+  if (options.body.thinking && typeof options.body.thinking === "object") {
+    const budget = options.body.thinking.budget_tokens;
+    if (typeof budget === "number" && budget > 0) return routes;
+  }
+  const clientEffort = options.body.output_config?.effort;
+  const requested = clientEffort ?? options.pool.effort;
+  const auto = requested === "auto";
+  for (const member of options.pool.members) {
+    options.signal.throwIfAborted();
+    const skip = (reason) => options.onSkip?.(member, reason);
+    const provider = options.providers.find((item) => item.id === member.providerId);
+    const model = provider?.models.find((item) => item.id === member.modelId);
+    if (!provider || !model || !model.npm || model.modelFormat === "cloud-code") {
+      skip("not available in the registry");
+      continue;
+    }
+    const revision = poolEndpointRevision({
+      providerId: provider.id,
+      authRef: provider.authRef,
+      npm: model.npm,
+      baseURL: model.apiBaseUrl,
+      upstreamModelId: model.upstreamModelId,
+      headers: provider.headers
+    });
+    const receipt = currentPoolReceipt(options.receipts, member, revision, Date.now());
+    if (!receipt || !receipt.billingSafe || !receipt.targets.includes("claude")) {
+      skip("no fresh verification for Claude (run Test)");
+      continue;
+    }
+    const freeStatus = poolFreeStatus({ model, providerId: provider.id });
+    if (freeStatus !== "verified_free") {
+      skip("not verified free");
+      continue;
+    }
+    const npm = model.npm;
+    routes.push(lazyPoolRoute({
+      member,
+      revision,
+      freeStatus,
+      catalogVerified: true,
+      accessVerified: true,
+      billingSafe: true,
+      targets: receipt.targets,
+      toolsVerified: receipt.tools,
+      defaultEffortVerified: true,
+      effortLevels: receipt.effortLevels,
+      contextFits: true,
+      contextVerified: true
+    }, async () => {
+      const gone = (reason) => {
+        skip(reason);
+        return { skip: reason };
+      };
+      try {
+        const memberEffort = poolMemberEffort(auto ? "auto" : requested, receipt);
+        const memberAuto = memberEffort === null;
+        const body = omitClaudeEffort(options.body, memberEffort);
+        const params = translateRequest(body, npm, {
+          maxTools: POOL_MAX_TOOLS,
+          reasoningMetadata: {
+            ...model,
+            providerId: provider.id,
+            apiBaseUrl: model.apiBaseUrl
+          }
+        });
+        const routeKey = poolRouteKey({ account: provider.id, endpointRevision: revision, model: model.id });
+        const thinking = (Array.isArray(body.messages) ? body.messages : []).flatMap((message) => {
+          const content = message.content;
+          return Array.isArray(content) ? content : [];
+        });
+        params.messages = params.messages.map((message) => ({
+          ...message,
+          content: Array.isArray(message.content) ? message.content.map((part) => {
+            if (part.type !== "reasoning" && part.type !== "tool-call") return part;
+            const { providerOptions: _routeState, ...clean } = part;
+            if (part.type === "tool-call") {
+              const signature = claudePoolSignatures.signature(splitToolUseId(part.toolCallId).rawId, routeKey);
+              return signature && npm === "@ai-sdk/google" ? { ...clean, providerOptions: { google: { thoughtSignature: signature } } } : clean;
+            }
+            const native = thinking.find((block) => block.thinking === part.text && typeof block.signature === "string" && claudePoolSignatures.ownsThinking(block.signature, routeKey));
+            if (!native?.signature) return clean;
+            if (npm === "@ai-sdk/anthropic") return { ...clean, providerOptions: { anthropic: { signature: native.signature } } };
+            return part;
+          }) : message.content
+        }));
+        if (memberAuto && translatedEffortClaim(params.providerOptions)) {
+          return gone("translation would set an effort");
+        }
+        const outputCap = poolOutputCap(provider.id, model.id, receipt.contextWindow);
+        const askedOutput = typeof body.max_tokens === "number" ? body.max_tokens : outputCap;
+        if (!Number.isSafeInteger(askedOutput) || askedOutput <= 0) {
+          return gone("invalid output limit");
+        }
+        const requestedOutput = Math.min(askedOutput, outputCap);
+        params.maxOutputTokens = requestedOutput;
+        const fits = poolRequestFitsWindow({
+          messages: params.messages,
+          instructions: params.instructions,
+          tools: params.tools
+        }, receipt.contextWindow, requestedOutput).fits;
+        if (!fits) {
+          return gone("request too large for its context window");
+        }
+        const scopes = [poolEndpointScope(provider.id, revision, model.id)];
+        const accountScopes = [poolAccountScope(provider.id)];
+        const off = await options.health.disabledFor(scopes);
+        if (off) {
+          return gone("DISABLED: " + off.note + " (run Test to re-enable)");
+        }
+        const until = await options.health.cooldownFor({ id: revision, scopes: [...scopes, ...accountScopes] });
+        if (until !== void 0 && until > Date.now()) {
+          return gone("cooling down after a failure");
+        }
+        const apiKey = await resolveLocalProviderApiKey(provider);
+        if (!apiKey) {
+          return gone("no credential");
+        }
+        const languageModel = await createLanguageModel({
+          npm,
+          modelId: model.upstreamModelId,
+          apiKey,
+          baseURL: model.apiBaseUrl,
+          providerId: provider.id,
+          authType: provider.authType,
+          oauthAccountId: provider.oauthAccountId,
+          providerData: provider.providerData,
+          headers: poolProviderHeaders(provider, model, options.sessionId),
+          sessionId: options.sessionId,
+          refreshToken: providerRefreshToken(provider.id, provider.authType, provider.authRef)
+        });
+        return { route: sdkPoolRoute({
+          member,
+          revision,
+          freeStatus,
+          catalogVerified: true,
+          accessVerified: true,
+          billingSafe: true,
+          targets: receipt.targets,
+          toolsVerified: receipt.tools,
+          defaultEffortVerified: true,
+          effortLevels: receipt.effortLevels,
+          contextFits: true,
+          contextVerified: true
+        }, languageModel, {
+          messages: params.messages,
+          tools: params.tools,
+          system: params.instructions,
+          maxOutputTokens: requestedOutput,
+          temperature: params.temperature,
+          toolChoice: params.toolChoice,
+          providerOptions: params.providerOptions,
+          headers: params.headers
+        }, { store: options.health, scopes, accountScopes }) };
+      } catch (error) {
+        if (options.signal.aborted) throw options.signal.reason ?? error;
+        return gone("could not be prepared: " + (error instanceof Error ? error.message : String(error)));
+      }
+    }));
+  }
+  return routes;
+}
+
+// src/pool/claude-launch.ts
+function servableClaudeMember(pool, providers, member, now) {
+  const provider = providers.find((item) => item.id === member.providerId);
+  const model = provider?.models.find((item) => item.id === member.modelId);
+  if (!provider || !model || !model.npm || model.modelFormat === "cloud-code") return void 0;
+  if (poolFreeStatus({ model, providerId: provider.id }) !== "verified_free") return void 0;
+  if (poolRoutingProblem(provider, model)) return void 0;
+  const revision = poolEndpointRevision({
+    providerId: provider.id,
+    authRef: provider.authRef,
+    npm: model.npm,
+    baseURL: model.apiBaseUrl,
+    upstreamModelId: model.upstreamModelId,
+    headers: provider.headers
+  });
+  const receipt = currentPoolReceipt(pool.receipts, member, revision, now);
+  if (!receipt || !receipt.billingSafe || !receipt.tools || !receipt.targets.includes("claude")) return void 0;
+  return receipt;
+}
+function prepareClaudeAutoPool(prefs, providers, now = Date.now()) {
+  let pool;
+  try {
+    pool = parseFreePool(prefs?.freePool);
+  } catch {
+    return void 0;
+  }
+  if (pool.enabled !== true || pool.members.length === 0) return void 0;
+  const entry = poolCatalogEntry(pool, pool.receipts, "claude", now);
+  if (!entry) return void 0;
+  if (!pool.members.some((member) => servableClaudeMember(pool, providers, member, now))) return void 0;
+  const health = new PoolHealthStore();
+  const runtime = new ClaudePoolRuntime(pool, (body, signal, sessionId, onSkip) => prepareClaudePoolRoutes({
+    pool,
+    providers,
+    receipts: pool.receipts,
+    body,
+    signal,
+    sessionId,
+    health,
+    onSkip
+  }));
+  return { pool, displayName: entry.display_name, contextWindow: entry.context_window, runtime };
+}
+
 // src/catalog.ts
 function localModelToRoute(lp, model) {
   if (model.modelFormat === "anthropic" && !model.baseUrl) return null;
@@ -3736,9 +3974,9 @@ function toOpenAiFinishReason(reason) {
 async function generateOpenAiResponse(model, params, responseModelId) {
   const result = await generateTextStreamingIfRequired({ model, ...params });
   const message = { role: "assistant", content: result.text || null };
-  if (result.reasoningText || result.reasoning) {
-    message.reasoning_content = result.reasoningText ?? result.reasoning;
-  }
+  const reasoning = result.reasoningText ?? result.reasoning;
+  const hasReasoning = typeof reasoning === "string" ? reasoning.length > 0 : Array.isArray(reasoning) ? reasoning.length > 0 : Boolean(reasoning);
+  if (hasReasoning) message.reasoning_content = reasoning;
   if (result.toolCalls?.length) {
     message.tool_calls = result.toolCalls.map((tc) => ({
       id: tc.toolCallId,
@@ -3847,6 +4085,9 @@ function makeServerLog(debugLogPath) {
   resetTraceLog(debugLogPath);
   return (msg) => writeSecureLogLine(debugLogPath, typeof msg === "function" ? msg() : msg);
 }
+function poolCatalogId(options) {
+  return options.pool?.modelId ?? CLAUDE_POOL_MODEL_ID;
+}
 async function startServer(options) {
   silenceSdkWarnings();
   const languageModelCache = /* @__PURE__ */ new Map();
@@ -3895,7 +4136,7 @@ async function routeRequest(req, res, options, modelCache, plog, subagentRouteRe
     if (req.method === "GET" && pathname === "/anthropic/v1/models") {
       const models = options.catalog.list();
       const payload = formatGatewayAnthropicModels(models, options.gateway);
-      const poolModel = options.pool ? models.find((model) => model.id === CLAUDE_POOL_MODEL_ID) : void 0;
+      const poolModel = options.pool ? models.find((model) => model.id === poolCatalogId(options)) : void 0;
       if (poolModel && options.pool) {
         const publicId = exposedGatewayAliasId(poolModel, options.gateway);
         for (const entry of payload.data) {
@@ -3936,7 +4177,7 @@ async function handleAnthropicMessages(req, res, options, modelCache, plog, suba
     plog(`model not found: ${body.model}`);
     return;
   }
-  if (options.pool && model.id === CLAUDE_POOL_MODEL_ID) {
+  if (options.pool && model.id === poolCatalogId(options)) {
     plog(`anthropic-messages pool=${model.id} stream=${body.stream === true}`);
     await serveAnthropicPool(req, res, options, body, plog);
     return;
@@ -4130,6 +4371,40 @@ async function serveAnthropicPool(req, res, options, body, plog) {
     }
   }
 }
+async function serveOpenAiPool(req, res, options, body, plog) {
+  const pool = options.pool;
+  if (!pool) return;
+  const sessionId = extractConversationId(req.headers, body);
+  const responseModelId = String(body.model ?? poolCatalogId(options));
+  plog(() => `openai-chat-completions pool stream=${body.stream === true}`);
+  try {
+    const [{ createRelayModel }, { RELAY_POOL_ROUTE_ID }] = await Promise.all([
+      import("./model-QBY2PRTS.js"),
+      import("./pool-model-LOTLKWMR.js")
+    ]);
+    const languageModel = await createRelayModel(RELAY_POOL_ROUTE_ID, { sessionId, onDebug: plog });
+    const params = translateOpenAiRequest(body);
+    if (body.stream === true) {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive"
+      });
+      await streamOpenAiResponse(languageModel, params, responseModelId, (chunk) => res.write(chunk), plog);
+      res.end();
+    } else {
+      const response = await generateOpenAiResponse(languageModel, params, responseModelId);
+      sendJson(res, 200, response);
+    }
+  } catch (err) {
+    const message = formatUpstreamError(err);
+    plog(`openai pool error: ${message}`);
+    if (!res.headersSent) {
+      const status = upstreamHttpStatus(err, message);
+      sendJson(res, status === 500 ? 502 : status, { error: { message } });
+    } else res.end();
+  }
+}
 async function handleOpenAIChatCompletions(req, res, options, modelCache, plog) {
   const body = await readJson(req);
   if (!body) {
@@ -4157,6 +4432,10 @@ async function handleOpenAIChatCompletions(req, res, options, modelCache, plog) 
   });
   const model = lookupModel(res, options.catalog, body.model);
   if (!model) return;
+  if (options.pool && model.id === poolCatalogId(options)) {
+    await serveOpenAiPool(req, res, options, body, plog);
+    return;
+  }
   if (supportsDirectOpenAIChatCompletions(model)) {
     if (model.completionsUrl && !/^https?:\/\//i.test(model.completionsUrl)) {
       sendJson(res, 400, { error: { message: `Invalid provider completionsUrl: must be http:// or https://` } });
@@ -4313,6 +4592,33 @@ function toRequest(req) {
 }
 function sanitizeIncomingHeaderValue(value) {
   return value.replace(/\r?\n/g, " ").trim();
+}
+
+// src/server/pool.ts
+var SERVER_POOL_MODEL_ID = "relay-free-pool";
+function prepareServerPool(providers) {
+  const auto = prepareClaudeAutoPool(loadPreferences(), providers);
+  if (!auto) return void 0;
+  return {
+    model: {
+      id: SERVER_POOL_MODEL_ID,
+      name: auto.displayName,
+      isFree: true,
+      brand: "Relay",
+      providerId: "relay-free-pool",
+      providerLabel: "Relay",
+      sourceBackend: "relay",
+      // Deliberately not a provider format: the router handles this id first and
+      // never forwards it to an upstream endpoint.
+      modelFormat: "unsupported",
+      contextWindow: auto.contextWindow
+    },
+    options: {
+      runtime: auto.runtime,
+      displayName: auto.displayName,
+      modelId: SERVER_POOL_MODEL_ID
+    }
+  };
 }
 
 // src/server/catalog-filter.ts
@@ -4570,14 +4876,14 @@ function providerOptionsFromCatalog(catalog) {
   }
   return options.sort((a, b) => a.name.localeCompare(b.name, void 0, { sensitivity: "base", numeric: true }));
 }
-async function loadServerModels() {
+async function loadServerCatalog() {
   const catalog = await fetchProviderCatalog({ agent: "server" });
   const models = [];
   const serverProviders = providersForTarget(catalog, "server");
   if (serverProviders.length > 0) {
     models.push(...localProvidersToServerModels(serverProviders));
   }
-  return models.map(enrichServerModelReasoning);
+  return { models: models.map(enrichServerModelReasoning), providers: catalog };
 }
 function enrichServerModelReasoning(model) {
   if (!model.npm || model.modelFormat !== "openai") return model;
@@ -4848,8 +5154,11 @@ async function runServerCommand(options = {}) {
   const spinner3 = p4.spinner();
   spinner3.start("Fetching available models...");
   let models;
+  let poolSetup;
   try {
-    models = await loadServerModels();
+    const loaded = await loadServerCatalog();
+    models = loaded.models;
+    poolSetup = prepareServerPool(loaded.providers);
     if (runConfig.exposedProviders) {
       models = filterServerModelsByProviders(models, runConfig.exposedProviders);
     }
@@ -4869,12 +5178,13 @@ async function runServerCommand(options = {}) {
     }
     if (runConfig.freeModelsOnly) {
       models = filterServerModelsByFreeStatus(models);
-      if (models.length === 0) {
+      if (models.length === 0 && !poolSetup) {
         spinner3.stop(pc4.red("No free models matched the current server filters"));
         p4.log.error("Turn off free-models-only mode or add a provider with free models.");
         return 1;
       }
     }
+    if (poolSetup) models = [...models, poolSetup.model];
     if (runConfig.favoritesOnly) {
       p4.log.info(
         `Favorites-only mode active \u2014 GET /anthropic/v1/models returns ${models.length} favorites.`
@@ -4910,6 +5220,7 @@ async function runServerCommand(options = {}) {
     catalog: createGatewayModelCatalog(models, gateway),
     backends: BACKENDS,
     gateway,
+    ...poolSetup ? { pool: poolSetup.options } : {},
     debugLogPath
   });
   console.log("");
@@ -5011,12 +5322,12 @@ function cachePath() {
 }
 function readFreshCache(now) {
   try {
-    const parsed = JSON.parse(readFileSync(cachePath(), "utf8"));
-    if (typeof parsed.latestVersion !== "string" || !parseVersion(parsed.latestVersion)) return null;
-    if (typeof parsed.checkedAt !== "number" || !Number.isFinite(parsed.checkedAt)) return null;
-    const age = now - parsed.checkedAt;
+    const parsed2 = JSON.parse(readFileSync(cachePath(), "utf8"));
+    if (typeof parsed2.latestVersion !== "string" || !parseVersion(parsed2.latestVersion)) return null;
+    if (typeof parsed2.checkedAt !== "number" || !Number.isFinite(parsed2.checkedAt)) return null;
+    const age = now - parsed2.checkedAt;
     if (age < 0 || age >= UPDATE_CHECK_TTL_MS) return null;
-    return { latestVersion: parsed.latestVersion, checkedAt: parsed.checkedAt };
+    return { latestVersion: parsed2.latestVersion, checkedAt: parsed2.checkedAt };
   } catch {
     return null;
   }
@@ -5477,6 +5788,466 @@ async function addProviderFromTemplate(template, apiKey, opts) {
   return { added: true, provider: entry, modelCount: pricedModels.length, ...notice ? { notice } : {} };
 }
 
+// src/usage/parse.ts
+var FIVE_HOURS = 5 * 3600;
+var SEVEN_DAYS = 7 * 86400;
+var THIRTY_DAYS = 30 * 86400;
+function obj(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+}
+function percent(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100 ? value : null;
+}
+function round(value) {
+  return Math.round(value * 100) / 100;
+}
+function toIsoTime(value) {
+  if (typeof value === "string" && value.trim()) {
+    const ms = Date.parse(value);
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return new Date(value < 1e12 ? value * 1e3 : value).toISOString();
+  }
+  const seconds = obj(value)?.["seconds"];
+  if (seconds !== void 0) return toIsoTime(typeof seconds === "string" ? Number(seconds) : seconds);
+  return null;
+}
+function durationLabel(seconds) {
+  if (seconds === FIVE_HOURS) return { id: "5h", label: "5-hour limit" };
+  if (seconds === SEVEN_DAYS) return { id: "7d", label: "Weekly limit" };
+  if (seconds === THIRTY_DAYS) return { id: "30d", label: "30-day limit" };
+  const hours = Math.round(seconds / 3600);
+  return hours % 24 === 0 ? { id: `${hours / 24}d`, label: `${hours / 24}-day limit` } : { id: `${hours}h`, label: `${hours}-hour limit` };
+}
+function parseClaudeUsage(payload) {
+  const data = obj(payload);
+  if (!data) return null;
+  const windows = [];
+  const add = (key, id, label, windowSeconds, family) => {
+    const raw = obj(data[key]);
+    const used = percent(raw?.["utilization"]);
+    if (used === null) return;
+    windows.push({
+      id,
+      label,
+      usedPercent: used,
+      resetsAt: toIsoTime(raw?.["resets_at"]),
+      windowSeconds,
+      scope: family ? { type: "model-group", family, modelIds: [] } : { type: "account" }
+    });
+  };
+  add("five_hour", "5h", "5-hour limit", FIVE_HOURS);
+  add("seven_day", "7d", "Weekly limit", SEVEN_DAYS);
+  add("seven_day_opus", "7d:opus", "Weekly Opus limit", SEVEN_DAYS, "opus");
+  add("seven_day_sonnet", "7d:sonnet", "Weekly Sonnet limit", SEVEN_DAYS, "sonnet");
+  return windows.length ? windows : null;
+}
+function parseChatGptUsage(payload) {
+  const rate = obj(obj(payload)?.["rate_limit"]);
+  if (!rate) return null;
+  const windows = [];
+  for (const key of ["primary_window", "secondary_window"]) {
+    const w = obj(rate[key]);
+    const used = percent(w?.["used_percent"]);
+    const seconds = w?.["limit_window_seconds"];
+    if (used === null || typeof seconds !== "number" || seconds <= 0) continue;
+    const resetAfter = w?.["reset_after_seconds"];
+    const resetsAt = toIsoTime(w?.["reset_at"]) ?? (typeof resetAfter === "number" && resetAfter >= 0 ? new Date(Date.now() + resetAfter * 1e3).toISOString() : null);
+    windows.push({ ...durationLabel(seconds), usedPercent: used, resetsAt, windowSeconds: seconds, scope: { type: "account" } });
+  }
+  if (!windows.length) return null;
+  return { windows, limitReached: rate["limit_reached"] === true || rate["allowed"] === false };
+}
+function antigravityPool(modelId) {
+  if (/^gemini-4(?:[.-]|$)/.test(modelId)) return "gemini-4";
+  if (modelId.startsWith("gemini")) return "gemini";
+  return "shared";
+}
+function antigravityGroupLabel(pool, modelIds) {
+  if (pool === "gemini-4") return "Gemini 4 models";
+  if (pool === "gemini") return "Gemini models";
+  const brands = new Set(modelIds.map((id) => id.startsWith("claude") ? "Claude" : id.startsWith("gpt") ? "GPT" : "Other"));
+  return `${[...brands].join(" / ")} models`;
+}
+function parseAntigravityUsage(responses) {
+  const perModel = /* @__PURE__ */ new Map();
+  for (const response of responses) {
+    const models = obj(obj(response)?.["models"]);
+    if (!models) continue;
+    for (const [id, raw] of Object.entries(models)) {
+      if (isAntigravityCloudCodeHelperSlot(id)) continue;
+      const quota = obj(obj(raw)?.["quotaInfo"]);
+      const remaining = quota?.["remainingFraction"];
+      const resetTime = toIsoTime(quota?.["resetTime"]);
+      if (typeof remaining !== "number" || !Number.isFinite(remaining) || !resetTime) continue;
+      const clamped = Math.min(1, Math.max(0, remaining));
+      const existing = perModel.get(id);
+      if (!existing || clamped < existing.remaining) perModel.set(id, { remaining: clamped, resetTime });
+    }
+  }
+  if (!perModel.size) return null;
+  const groups = /* @__PURE__ */ new Map();
+  for (const [id, { remaining, resetTime }] of perModel) {
+    const pool = antigravityPool(id);
+    const key = `${pool}|${remaining}|${resetTime}`;
+    const group = groups.get(key) ?? { pool, remaining, resetTime, modelIds: [] };
+    group.modelIds.push(id);
+    groups.set(key, group);
+  }
+  const order = ["gemini-4", "gemini", "shared"];
+  return [...groups.values()].sort((a, b) => order.indexOf(a.pool) - order.indexOf(b.pool) || a.resetTime.localeCompare(b.resetTime)).map((group) => {
+    group.modelIds.sort();
+    return {
+      id: `models:${group.pool}:${group.resetTime}`,
+      label: antigravityGroupLabel(group.pool, group.modelIds),
+      usedPercent: round((1 - group.remaining) * 100),
+      resetsAt: group.resetTime,
+      scope: { type: "model-group", family: group.pool, modelIds: group.modelIds }
+    };
+  });
+}
+var COPILOT_QUOTA_LABELS = {
+  premium_interactions: "Premium requests",
+  chat: "Chat messages",
+  completions: "Code completions"
+};
+function parseCopilotUsage(payload) {
+  const data = obj(payload);
+  if (!data) return null;
+  const resetsAt = toIsoTime(data["quota_reset_date_utc"]) ?? toIsoTime(data["quota_reset_date"]) ?? toIsoTime(data["limited_user_reset_date"]);
+  const windows = [];
+  const snapshots = obj(data["quota_snapshots"]);
+  if (snapshots) {
+    for (const [key, raw] of Object.entries(snapshots)) {
+      const snap = obj(raw);
+      if (!snap || snap["unlimited"] === true) continue;
+      const entitlement = snap["entitlement"];
+      if (entitlement === 0) continue;
+      let used = null;
+      const remainingPct = percent(snap["percent_remaining"]);
+      const remaining = snap["remaining"];
+      if (remainingPct !== null) used = round(100 - remainingPct);
+      else if (typeof entitlement === "number" && entitlement > 0 && typeof remaining === "number") {
+        used = round(Math.min(100, Math.max(0, (1 - remaining / entitlement) * 100)));
+      }
+      if (used === null) continue;
+      windows.push({
+        id: `monthly:${key}`,
+        label: `${COPILOT_QUOTA_LABELS[key] ?? key} (monthly)`,
+        usedPercent: used,
+        resetsAt,
+        ...typeof entitlement === "number" && entitlement > 0 ? { limit: entitlement } : {},
+        ...typeof remaining === "number" ? { remaining } : {},
+        scope: { type: "account" }
+      });
+    }
+  }
+  const monthly = obj(data["monthly_quotas"]);
+  const left = obj(data["limited_user_quotas"]);
+  if (!windows.length && monthly && left) {
+    for (const [key, total] of Object.entries(monthly)) {
+      const remaining = left[key];
+      if (typeof total !== "number" || total <= 0 || typeof remaining !== "number") continue;
+      windows.push({
+        id: `monthly:${key}`,
+        label: `${COPILOT_QUOTA_LABELS[key] ?? key} (monthly)`,
+        usedPercent: round(Math.min(100, Math.max(0, (1 - remaining / total) * 100))),
+        resetsAt,
+        limit: total,
+        remaining,
+        scope: { type: "account" }
+      });
+    }
+  }
+  return windows.length ? windows : null;
+}
+function parseXaiUsage(payload) {
+  const outer = obj(payload);
+  const data = obj(outer?.["config"]) ?? outer;
+  if (!data) return null;
+  const period = obj(data["currentPeriod"]) ?? obj(data["current_period"]);
+  const start = toIsoTime(period?.["start"] ?? period?.["startTime"] ?? data["billingPeriodStart"]);
+  const end = toIsoTime(period?.["end"] ?? period?.["endTime"] ?? data["billingPeriodEnd"]);
+  const windowSeconds = start && end ? Math.round((Date.parse(end) - Date.parse(start)) / 1e3) : void 0;
+  const periodType = typeof period?.["type"] === "string" ? period["type"] : "";
+  const windows = [];
+  const reported = percent(data["creditUsagePercent"] ?? data["credit_usage_percent"]);
+  if (reported !== null || end) {
+    const used = reported ?? 0;
+    const label = periodType.endsWith("WEEKLY") || windowSeconds && Math.abs(windowSeconds - SEVEN_DAYS) < 3600 ? "Weekly limit" : periodType.endsWith("MONTHLY") || windowSeconds && windowSeconds > 27 * 86400 ? "Monthly limit" : "Usage limit";
+    windows.push({
+      id: "credits",
+      label,
+      usedPercent: used,
+      resetsAt: end,
+      ...windowSeconds && windowSeconds > 0 ? { windowSeconds } : {},
+      scope: { type: "account" }
+    });
+  }
+  const products = data["productUsage"] ?? data["product_usage"];
+  if (Array.isArray(products)) {
+    for (const raw of products) {
+      const item = obj(raw);
+      const product = typeof item?.["product"] === "string" ? item["product"] : void 0;
+      const used = percent(item?.["usagePercent"] ?? item?.["usage_percent"]);
+      if (!product || used === null) continue;
+      windows.push({
+        id: `product:${product}`,
+        label: product.replace(/([a-z])([A-Z])/g, "$1 $2"),
+        usedPercent: used,
+        resetsAt: end,
+        ...windowSeconds && windowSeconds > 0 ? { windowSeconds } : {},
+        scope: { type: "account" }
+      });
+    }
+  }
+  const balances = [];
+  const prepaid = obj(data["prepaidBalance"] ?? data["prepaid_balance"]);
+  if (prepaid) {
+    const raw = prepaid["val"] ?? 0;
+    const cents = typeof raw === "string" ? Number(raw) : raw;
+    if (typeof cents === "number" && Number.isFinite(cents)) {
+      balances.push({ id: "extra-credits", label: "Extra usage credits", amount: cents / 100, currency: "USD" });
+    }
+  }
+  return windows.length || balances.length ? { windows, balances } : null;
+}
+
+// src/usage/store.ts
+import { chmodSync as chmodSync2, existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync2, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "fs";
+import { dirname, join as join2 } from "path";
+var STORE_VERSION = 1;
+function usageStorePath() {
+  return join2(getAppHome(), "usage.json");
+}
+function readStore(path) {
+  try {
+    const parsed2 = JSON.parse(readFileSync2(path, "utf8"));
+    if (parsed2?.version === STORE_VERSION && parsed2.accounts && typeof parsed2.accounts === "object") return parsed2;
+  } catch {
+  }
+  return { version: STORE_VERSION, accounts: {} };
+}
+function loadStoredUsage(path = usageStorePath()) {
+  return readStore(path).accounts;
+}
+function saveUsageResults(results, path = usageStorePath()) {
+  const store = readStore(path);
+  for (const result of results) {
+    const previous = store.accounts[result.providerId];
+    store.accounts[result.providerId] = result.status === "error" && previous?.windows.length ? { ...result, windows: previous.windows, ...previous.balances ? { balances: previous.balances } : {}, fetchedAt: previous.fetchedAt, ...previous.limitReached !== void 0 ? { limitReached: previous.limitReached } : {} } : result;
+  }
+  if (!existsSync2(dirname(path))) mkdirSync2(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp`;
+  writeFileSync2(tmp, `${JSON.stringify(store, null, 2)}
+`, { mode: 384 });
+  renameSync2(tmp, path);
+  try {
+    chmodSync2(path, 384);
+  } catch {
+  }
+  return store.accounts;
+}
+
+// src/core/usage.ts
+var CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+var CHATGPT_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
+var COPILOT_USER_URL = "https://api.github.com/copilot_internal/user";
+var XAI_BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
+var DEFAULT_TIMEOUT_MS = 1e4;
+var USAGE_KINDS = /* @__PURE__ */ new Set(["claude-code", "openai-oauth", "antigravity", "xai-oauth", "github-copilot"]);
+var UsageError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+  code;
+};
+function statusError(status, provider) {
+  if (status === 401) return new UsageError("reauth_required", `${provider} rejected the sign-in \u2014 sign in again in relay-ai.`);
+  if (status === 403) return new UsageError("access_denied", `${provider} refused the usage request (403).`);
+  if (status === 429) return new UsageError("rate_limited", `${provider} is rate-limiting usage requests \u2014 try again later.`);
+  return new UsageError("unavailable", `${provider} usage request failed (${status}).`);
+}
+async function getJson(ctx, url, init, provider) {
+  let response;
+  try {
+    response = await ctx.fetchImpl(url, { ...init, redirect: "error", signal: AbortSignal.timeout(ctx.timeoutMs) });
+  } catch {
+    throw new UsageError("unavailable", `${provider} usage request did not complete.`);
+  }
+  if (!response.ok) throw statusError(response.status, provider);
+  try {
+    return await response.json();
+  } catch {
+    throw new UsageError("unsupported_payload", `${provider} returned a usage response Relay could not read.`);
+  }
+}
+function parsed(value, provider) {
+  if (value === null) throw new UsageError("unsupported_payload", `${provider} returned no usage Relay recognises.`);
+  return value;
+}
+async function accessToken(provider) {
+  let token = null;
+  try {
+    token = await resolveProviderCredential(provider.id, provider.authRef);
+  } catch {
+    throw new UsageError("reauth_required", `Could not refresh the sign-in for ${provider.name} \u2014 sign in again in relay-ai.`);
+  }
+  if (!token) throw new UsageError("credential_unavailable", `No stored sign-in for ${provider.name}.`);
+  return token;
+}
+async function claudeUsage(provider, ctx) {
+  const body = await getJson(ctx, CLAUDE_USAGE_URL, {
+    headers: {
+      Authorization: `Bearer ${await accessToken(provider)}`,
+      "anthropic-beta": "oauth-2025-04-20",
+      "User-Agent": `claude-cli/${CLAUDE_CODE_CLI_VERSION} (external, cli)`,
+      Accept: "application/json"
+    }
+  }, "Claude");
+  const windows = parsed(parseClaudeUsage(body), "Claude");
+  return { windows, limitReached: windows.some((w) => w.scope.type === "account" && (w.usedPercent ?? 0) >= 100) };
+}
+async function chatGptUsage(provider, ctx) {
+  const token = await accessToken(provider);
+  const accountId = await resolveProviderOAuthAccountId(provider.authRef).catch(() => void 0);
+  const body = await getJson(ctx, CHATGPT_USAGE_URL, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...accountId ? { "ChatGPT-Account-Id": accountId } : {},
+      "User-Agent": "codex-cli",
+      Accept: "application/json"
+    }
+  }, "ChatGPT");
+  return parsed(parseChatGptUsage(body), "ChatGPT");
+}
+async function antigravityUsage(provider, ctx) {
+  const token = await accessToken(provider);
+  const responses = [];
+  let lastError;
+  for (const base of ANTIGRAVITY_BASE_URLS) {
+    try {
+      responses.push(await getJson(ctx, `${base}/v1internal:fetchAvailableModels`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "User-Agent": ANTIGRAVITY_USER_AGENT,
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        body: "{}"
+      }, "Antigravity"));
+    } catch (err) {
+      lastError = err instanceof UsageError ? err : new UsageError("unavailable", "Antigravity usage request failed.");
+    }
+  }
+  if (!responses.length) throw lastError ?? new UsageError("unavailable", "Antigravity usage request failed.");
+  const windows = parsed(parseAntigravityUsage(responses), "Antigravity");
+  return { windows };
+}
+async function copilotUsage(provider, ctx) {
+  const stored = await readStoredOAuthCredential(provider.authRef).catch(() => void 0);
+  if (!stored?.refresh) throw new UsageError("credential_unavailable", `No stored GitHub sign-in for ${provider.name}.`);
+  const body = await getJson(ctx, COPILOT_USER_URL, {
+    headers: {
+      Authorization: `Bearer ${stored.refresh}`,
+      Accept: "application/json",
+      "User-Agent": `relay-ai/${VERSION}`,
+      "Editor-Version": "vscode/1.85.1",
+      "X-GitHub-Api-Version": "2025-04-01"
+    }
+  }, "GitHub Copilot");
+  const windows = parsed(parseCopilotUsage(body), "GitHub Copilot");
+  return { windows, limitReached: windows.some((w) => w.id === "monthly:premium_interactions" && (w.usedPercent ?? 0) >= 100) };
+}
+async function xaiUsage(provider, ctx) {
+  const body = await getJson(ctx, XAI_BILLING_URL, {
+    headers: {
+      Authorization: `Bearer ${await accessToken(provider)}`,
+      "X-XAI-Token-Auth": "xai-grok-cli",
+      Accept: "application/json"
+    }
+  }, "xAI");
+  const { windows, balances } = parsed(parseXaiUsage(body), "xAI");
+  return { windows, balances, limitReached: windows.some((w) => w.id === "credits" && (w.usedPercent ?? 0) >= 100) };
+}
+var FETCHERS = {
+  "claude-code": claudeUsage,
+  "openai-oauth": chatGptUsage,
+  antigravity: antigravityUsage,
+  "xai-oauth": xaiUsage,
+  "github-copilot": copilotUsage
+};
+function supportsAccountUsage(providerId) {
+  return USAGE_KINDS.has(providerKind(providerId));
+}
+async function usageForProvider(provider, ctx) {
+  const kind = providerKind(provider.id);
+  const base = { providerId: provider.id, providerKind: kind, providerName: provider.name };
+  const fetcher = FETCHERS[kind];
+  if (!fetcher) return { ...base, status: "unsupported", windows: [], fetchedAt: null };
+  try {
+    const result = await fetcher(provider, ctx);
+    return {
+      ...base,
+      status: "ok",
+      windows: result.windows,
+      ...result.balances?.length ? { balances: result.balances } : {},
+      ...result.limitReached !== void 0 ? { limitReached: result.limitReached } : {},
+      fetchedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  } catch (err) {
+    const error = err instanceof UsageError ? err : new UsageError("unavailable", `Usage lookup failed for ${provider.name}.`);
+    return { ...base, status: "error", windows: [], fetchedAt: null, error: { code: error.code, message: error.message } };
+  }
+}
+function oauthAccounts(opts) {
+  const registry = loadCoreRegistry(opts.registryPath);
+  const wanted = opts.providerIds ? new Set(opts.providerIds) : void 0;
+  return registry.providers.filter((p8) => p8.enabled && p8.authType === "oauth" && (!wanted || wanted.has(p8.id)));
+}
+var inFlight = /* @__PURE__ */ new Map();
+function checkOnce(provider, ctx, key) {
+  const running = inFlight.get(key);
+  if (running) return running;
+  const check = usageForProvider(provider, ctx).finally(() => inFlight.delete(key));
+  inFlight.set(key, check);
+  return check;
+}
+async function checkAccounts(providers, opts) {
+  const ctx = { fetchImpl: opts.fetchImpl ?? globalThis.fetch, timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS };
+  const scope = `${opts.registryPath ?? ""}|${opts.usageStorePath ?? ""}`;
+  const results = await Promise.all(providers.map((provider) => checkOnce(provider, ctx, `${scope}|${provider.id}`)));
+  if (opts.persist === false) return results;
+  const stored = saveUsageResults(results.filter((r) => r.status !== "unsupported"), opts.usageStorePath);
+  return results.map((r) => stored[r.providerId] ?? r);
+}
+async function getRelayAccountUsage(opts = {}) {
+  return checkAccounts(oauthAccounts(opts), opts);
+}
+async function checkUsageAfterSignIn(providerId, opts = {}) {
+  if (!supportsAccountUsage(providerId)) return;
+  try {
+    await getRelayAccountUsage({ ...opts, providerIds: [providerId] });
+  } catch {
+  }
+}
+async function readRelayAccountUsage(opts = {}) {
+  const providers = oauthAccounts(opts);
+  const stored = loadStoredUsage(opts.usageStorePath);
+  const missing = providers.filter((p8) => supportsAccountUsage(p8.id) && !stored[p8.id]);
+  const fetched = opts.fetchMissing && missing.length ? new Map((await checkAccounts(missing, opts)).map((r) => [r.providerId, r])) : /* @__PURE__ */ new Map();
+  return providers.map((provider) => {
+    const kind = providerKind(provider.id);
+    const base = { providerId: provider.id, providerKind: kind, providerName: provider.name };
+    if (!supportsAccountUsage(provider.id)) return { ...base, status: "unsupported", windows: [], fetchedAt: null };
+    const reading = fetched.get(provider.id) ?? stored[provider.id];
+    return reading ? { ...reading, ...base } : { ...base, status: "unchecked", windows: [], fetchedAt: null };
+  });
+}
+
 // src/oauth/claude-code-account.ts
 function claudeCodeProviderData(bootstrap) {
   const data = { cliUserID: generateCliUserID() };
@@ -5658,6 +6429,7 @@ async function saveNativeOAuthCredential(providerId, tokens, accountId, provider
   );
   if (!saved) throw new Error(`Could not save OAuth tokens to credential store${diagMsg ? ` \u2014 ${diagMsg}` : " \u2014 grant Keychain access or check RELAY_AI_HOME is writable"}`);
   await upsertOAuthProvider(plan, cred);
+  void checkUsageAfterSignIn(plan.registryId);
   return plan.registryId;
 }
 function oauthDisplayName(registryId, fallbackName) {
@@ -5742,6 +6514,7 @@ async function authenticateProvider(providerId, options = {}) {
   } catch {
     refreshSpinner.stop("Could not refresh models \u2014 run relay-ai providers refresh-models later");
   }
+  await checkUsageAfterSignIn(registryId);
   return { providerId: registryId, credential: cred, registryProvider };
 }
 function providerAuthHelpText() {
@@ -5770,9 +6543,9 @@ ${pc5.dim("OpenCode CLI configs: use")} relay-ai providers import${pc5.dim(" (op
 
 // src/codex/app-launch.ts
 import { execFileSync as execFileSync3, execSync, spawn } from "child_process";
-import { copyFileSync, existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, realpathSync, statSync } from "fs";
+import { copyFileSync, existsSync as existsSync3, mkdirSync as mkdirSync3, readdirSync as readdirSync2, realpathSync, statSync } from "fs";
 import { homedir } from "os";
-import { dirname, join as join2, win32 as winPath } from "path";
+import { dirname as dirname2, join as join3, win32 as winPath } from "path";
 import * as p6 from "@clack/prompts";
 
 // src/linux-display.ts
@@ -5829,7 +6602,7 @@ function runPowerShell(script) {
 function darwinAppCandidates() {
   return DARWIN_APP_NAMES.flatMap((name) => [
     `/Applications/${name}.app`,
-    join2(homedir(), "Applications", `${name}.app`)
+    join3(homedir(), "Applications", `${name}.app`)
   ]);
 }
 function linuxCodexAppCandidates(home = homedir()) {
@@ -5838,8 +6611,8 @@ function linuxCodexAppCandidates(home = homedir()) {
     "/usr/lib/chatgpt/ChatGPT",
     "/opt/chatgpt/ChatGPT",
     "/usr/local/lib/chatgpt/ChatGPT",
-    join2(home, ".local", "bin", "chatgpt"),
-    join2(home, ".local", "share", "chatgpt", "ChatGPT")
+    join3(home, ".local", "bin", "chatgpt"),
+    join3(home, ".local", "share", "chatgpt", "ChatGPT")
   ];
 }
 function linuxEmbeddedCodexCandidates(appPath) {
@@ -5851,12 +6624,12 @@ function linuxEmbeddedCodexCandidates(appPath) {
     }
   })();
   return [.../* @__PURE__ */ new Set([
-    join2(dirname(resolvedPath), "resources", "codex"),
-    join2(dirname(appPath), "resources", "codex")
+    join3(dirname2(resolvedPath), "resources", "codex"),
+    join3(dirname2(appPath), "resources", "codex")
   ])];
 }
 function winLocalAppData() {
-  return process.env.LOCALAPPDATA ?? join2(homedir(), "AppData", "Local");
+  return process.env.LOCALAPPDATA ?? join3(homedir(), "AppData", "Local");
 }
 function windowsEmbeddedCodexCandidates(appPath, packageInstallLocations) {
   const candidates = [];
@@ -5888,8 +6661,8 @@ function executableWindowsEmbeddedCodexPath(sourcePath) {
   if (!cachePath2) return sourcePath;
   try {
     const sourceSize = statSync(sourcePath).size;
-    if (existsSync2(cachePath2) && statSync(cachePath2).size === sourceSize) return cachePath2;
-    mkdirSync2(winPath.dirname(cachePath2), { recursive: true });
+    if (existsSync3(cachePath2) && statSync(cachePath2).size === sourceSize) return cachePath2;
+    mkdirSync3(winPath.dirname(cachePath2), { recursive: true });
     copyFileSync(sourcePath, cachePath2);
     return statSync(cachePath2).size === sourceSize ? cachePath2 : null;
   } catch {
@@ -5909,24 +6682,24 @@ function winCodexPackageInstallLocations() {
 function winCodexExeCandidates() {
   const local = winLocalAppData();
   const bases = WIN_APP_NAMES.flatMap((name) => [
-    join2(local, "Programs", name),
-    join2(local, "Programs", `OpenAI ${name}`),
-    join2(local, name),
-    join2(local, `OpenAI ${name}`),
-    join2(local, "OpenAI", name)
+    join3(local, "Programs", name),
+    join3(local, "Programs", `OpenAI ${name}`),
+    join3(local, name),
+    join3(local, `OpenAI ${name}`),
+    join3(local, "OpenAI", name)
   ]);
-  bases.push(join2(local, "openai-codex-electron"), join2(local, "openai-chatgpt-electron"));
+  bases.push(join3(local, "openai-codex-electron"), join3(local, "openai-chatgpt-electron"));
   const out = [];
   for (const base of bases) {
     for (const name of WIN_APP_NAMES) {
-      out.push(join2(base, `${name}.exe`));
+      out.push(join3(base, `${name}.exe`));
     }
     try {
-      if (existsSync2(base)) {
+      if (existsSync3(base)) {
         for (const dir of readdirSync2(base)) {
           if (dir.startsWith("app-")) {
             for (const name of WIN_APP_NAMES) {
-              out.push(join2(base, dir, `${name}.exe`));
+              out.push(join3(base, dir, `${name}.exe`));
             }
           }
         }
@@ -5940,7 +6713,7 @@ function mdfindCodexApp() {
   try {
     const out = run(`mdfind "kMDItemCFBundleIdentifier == '${CODEX_BUNDLE_ID}'"`);
     const first = out.split("\n").map((l) => l.trim()).find(Boolean);
-    return first && existsSync2(first) ? first : null;
+    return first && existsSync3(first) ? first : null;
   } catch {
     return null;
   }
@@ -5948,14 +6721,14 @@ function mdfindCodexApp() {
 function findCodexApp(platform = process.platform) {
   if (platform === "darwin") {
     for (const path of darwinAppCandidates()) {
-      if (existsSync2(path)) return path;
+      if (existsSync3(path)) return path;
     }
     return mdfindCodexApp();
   }
   if (platform === "win32") {
     for (const path of winCodexExeCandidates()) {
       try {
-        if (existsSync2(path) && statSync(path).isFile()) return path;
+        if (existsSync3(path) && statSync(path).isFile()) return path;
       } catch {
       }
     }
@@ -5969,7 +6742,7 @@ function findCodexApp(platform = process.platform) {
     }
   }
   if (platform === "linux") {
-    return linuxCodexAppCandidates().find((path) => existsSync2(path)) ?? null;
+    return linuxCodexAppCandidates().find((path) => existsSync3(path)) ?? null;
   }
   return null;
 }
@@ -5977,18 +6750,18 @@ function findEmbeddedCodexBinary(platform = process.platform, appPath = findCode
   if (platform === "darwin") {
     if (!appPath) return null;
     return [
-      join2(appPath, "Contents", "Resources", "codex-cli", "bin", "codex"),
-      join2(appPath, "Contents", "Resources", "codex")
-    ].find((binary) => existsSync2(binary)) ?? null;
+      join3(appPath, "Contents", "Resources", "codex-cli", "bin", "codex"),
+      join3(appPath, "Contents", "Resources", "codex")
+    ].find((binary) => existsSync3(binary)) ?? null;
   }
   if (platform === "linux") {
     if (!appPath) return null;
-    return linuxEmbeddedCodexCandidates(appPath).find((path) => existsSync2(path)) ?? null;
+    return linuxEmbeddedCodexCandidates(appPath).find((path) => existsSync3(path)) ?? null;
   }
   if (platform === "win32") {
     const sourcePath = windowsEmbeddedCodexCandidates(appPath, winCodexPackageInstallLocations()).find((path) => {
       try {
-        return existsSync2(path) && statSync(path).isFile();
+        return existsSync3(path) && statSync(path).isFile();
       } catch {
         return false;
       }
@@ -6022,7 +6795,7 @@ function pgrepExact(names) {
   return [...pids];
 }
 function darwinMainExecutableCandidates(appPath) {
-  return DARWIN_APP_NAMES.map((name) => join2(appPath, "Contents", "MacOS", name));
+  return DARWIN_APP_NAMES.map((name) => join3(appPath, "Contents", "MacOS", name));
 }
 function darwinMainPidsFromProcessList(processList, commands, currentPid = process.pid) {
   const pids = /* @__PURE__ */ new Set();
@@ -6251,9 +7024,9 @@ function codexAppInstallHint() {
 
 // src/claude-desktop/app-launch.ts
 import { execSync as execSync2, spawn as spawn2 } from "child_process";
-import { existsSync as existsSync3, readdirSync as readdirSync3, readFileSync as readFileSync2, statSync as statSync2 } from "fs";
+import { existsSync as existsSync4, readdirSync as readdirSync3, readFileSync as readFileSync3, statSync as statSync2 } from "fs";
 import { homedir as homedir2 } from "os";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 import * as p7 from "@clack/prompts";
 var CLAUDE_BUNDLE_ID = "com.anthropic.claudefordesktop";
 function claudeAppSupported() {
@@ -6270,28 +7043,28 @@ function runPowerShell2(script) {
 function darwinAppCandidates2() {
   return [
     "/Applications/Claude.app",
-    join3(homedir2(), "Applications", "Claude.app")
+    join4(homedir2(), "Applications", "Claude.app")
   ];
 }
 function winLocalAppData2() {
-  return process.env.LOCALAPPDATA ?? join3(homedir2(), "AppData", "Local");
+  return process.env.LOCALAPPDATA ?? join4(homedir2(), "AppData", "Local");
 }
 function winClaudeExeCandidates() {
   const local = winLocalAppData2();
   const bases = [
     // Squirrel install folder used by the Anthropic Claude desktop installer.
-    join3(local, "AnthropicClaude"),
-    join3(local, "Programs", "Claude"),
-    join3(local, "Claude")
+    join4(local, "AnthropicClaude"),
+    join4(local, "Programs", "Claude"),
+    join4(local, "Claude")
   ];
   const out = [];
   for (const base of bases) {
-    out.push(join3(base, "Claude.exe"));
+    out.push(join4(base, "Claude.exe"));
     try {
-      if (existsSync3(base)) {
+      if (existsSync4(base)) {
         for (const name of readdirSync3(base)) {
           if (name.startsWith("app-")) {
-            out.push(join3(base, name, "Claude.exe"));
+            out.push(join4(base, name, "Claude.exe"));
           }
         }
       }
@@ -6306,13 +7079,13 @@ function linuxClaudeCandidates() {
     "/usr/bin/claude-desktop",
     "/usr/lib/claude-desktop/claude-desktop",
     "/opt/Claude/claude-desktop",
-    join3(homedir2(), ".local", "bin", "claude-desktop")
+    join4(homedir2(), ".local", "bin", "claude-desktop")
   ];
 }
 function linuxWhichClaude() {
   try {
     const out = run2("command -v claude-desktop");
-    return out && existsSync3(out) ? out : null;
+    return out && existsSync4(out) ? out : null;
   } catch {
     return null;
   }
@@ -6329,7 +7102,7 @@ function linuxMainPid() {
   const pids = linuxMatchingPids2();
   for (const pid of pids) {
     try {
-      const cmdline = readFileSync2(`/proc/${pid}/cmdline`, "utf8");
+      const cmdline = readFileSync3(`/proc/${pid}/cmdline`, "utf8");
       if (!cmdline.includes("--type=")) return pid;
     } catch {
     }
@@ -6356,7 +7129,7 @@ function mdfindClaudeApp() {
   try {
     const out = run2(`mdfind "kMDItemCFBundleIdentifier == '${CLAUDE_BUNDLE_ID}'"`);
     const first = out.split("\n").map((l) => l.trim()).find(Boolean);
-    return first && existsSync3(first) ? first : null;
+    return first && existsSync4(first) ? first : null;
   } catch {
     return null;
   }
@@ -6364,14 +7137,14 @@ function mdfindClaudeApp() {
 function findClaudeApp() {
   if (process.platform === "darwin") {
     for (const path of darwinAppCandidates2()) {
-      if (existsSync3(path)) return path;
+      if (existsSync4(path)) return path;
     }
     return mdfindClaudeApp();
   }
   if (process.platform === "win32") {
     for (const path of winClaudeExeCandidates()) {
       try {
-        if (existsSync3(path) && statSync2(path).isFile()) return path;
+        if (existsSync4(path) && statSync2(path).isFile()) return path;
       } catch {
       }
     }
@@ -6386,7 +7159,7 @@ function findClaudeApp() {
   if (process.platform === "linux") {
     for (const path of linuxClaudeCandidates()) {
       try {
-        if (existsSync3(path)) return path;
+        if (existsSync4(path)) return path;
       } catch {
       }
     }
@@ -6555,7 +7328,6 @@ export {
   printProviderDetailPanel,
   printCloudProviderPanel,
   findBinaryOnPath,
-  claudePoolSignatures,
   CLAUDE_POOL_MODEL_ID,
   ClaudePoolRuntime,
   formatAnthropicModelEntry,
@@ -6571,6 +7343,8 @@ export {
   aliasModelId,
   startProxyCatalog,
   startProxy,
+  prepareClaudePoolRoutes,
+  prepareClaudeAutoPool,
   localModelToRoute,
   makeRouteResolver,
   buildCatalogRoutes,
@@ -6579,13 +7353,14 @@ export {
   resolveAdvertiseGatewayPort,
   formatGatewayUrls,
   startServer,
+  prepareServerPool,
   filterServerModelsByProviders,
   filterServerModelsByFavorites,
   filterServerModelsByFreeStatus,
   summarizeServerProviders,
   buildVertexRuntimeConfig,
   providerOptionsFromCatalog,
-  loadServerModels,
+  loadServerCatalog,
   resolveServerUpstreamApiKey,
   runServerCommand,
   checkForUpdates,
@@ -6599,6 +7374,8 @@ export {
   checkVertexModelAccess,
   filterVertexModelsByAccess,
   addProviderFromTemplate,
+  getRelayAccountUsage,
+  readRelayAccountUsage,
   claudeCodeProviderData,
   saveNativeOAuthCredential,
   authenticateProvider,

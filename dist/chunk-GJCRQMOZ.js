@@ -53,6 +53,7 @@ import {
   uniqueProviderName,
   validateProviderName,
   vertexAnthropicCachedModels,
+  wireApiKey,
   writeSecureLogLine
 } from "./chunk-4YNBCXOB.js";
 import {
@@ -478,7 +479,7 @@ async function fetchTemplateModels(template, apiKey, baseUrlOverride, extraHeade
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), effectiveTimeoutMs);
   const headers = { Accept: "application/json" };
-  const trimmedApiKey = apiKey.trim();
+  const trimmedApiKey = wireApiKey(apiKey);
   if (template.npm === "@ai-sdk/anthropic") {
     if (trimmedApiKey) headers["x-api-key"] = trimmedApiKey;
     headers["anthropic-version"] = "2023-06-01";
